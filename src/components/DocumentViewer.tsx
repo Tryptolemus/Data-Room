@@ -8,11 +8,8 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-// Set up PDF.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+// Set up PDF.js worker using CDN
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 export default function DocumentViewer() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +20,7 @@ export default function DocumentViewer() {
   const [error, setError] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [isFocused, setIsFocused] = useState(true);
+  const [pdfError, setPdfError] = useState<Error | null>(null);
   
   const viewStartTime = useRef<number>(Date.now());
 
@@ -208,8 +206,18 @@ export default function DocumentViewer() {
                 <Document
                   file={`/api/proxy-pdf?url=${encodeURIComponent(documentData.fileUrl)}`}
                   onLoadSuccess={onDocumentLoadSuccess}
-                  onLoadError={(error) => console.error('Error while loading document!', error)}
+                  onLoadError={(error) => {
+                    console.error('Error while loading document!', error);
+                    setPdfError(error);
+                  }}
                   loading={<Loader2 className="w-8 h-8 animate-spin text-zinc-400 my-12" />}
+                  error={
+                    <div className="flex flex-col items-center justify-center p-12 text-center">
+                      <ShieldAlert className="w-12 h-12 text-red-500 mb-4" />
+                      <p className="text-zinc-900 font-medium">Failed to load PDF</p>
+                      <p className="text-zinc-500 text-sm mt-2">{pdfError?.message || 'The document could not be rendered.'}</p>
+                    </div>
+                  }
                   className="flex flex-col items-center gap-8"
                 >
                   {Array.from(new Array(numPages || 0), (el, index) => (
