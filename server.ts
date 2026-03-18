@@ -19,16 +19,16 @@ async function startServer() {
         return res.status(400).send('Missing URL parameter');
       }
 
-      console.log(`[Proxy] Fetching PDF: ${url.split('?')[0]}`);
+      console.log(`[Proxy] Fetching URL: ${url}`);
 
       if (!url.startsWith('https://firebasestorage.googleapis.com/') && !url.startsWith('https://storage.googleapis.com/')) {
         console.warn(`[Proxy] Potentially invalid URL domain: ${url}`);
-        // Still proceed for now but log it, or you can be strict if preferred
       }
 
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/pdf, */*'
         }
       });
 

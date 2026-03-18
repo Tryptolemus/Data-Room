@@ -204,9 +204,7 @@ export default function DocumentViewer() {
             {isPdf ? (
               <div className="flex flex-col items-center py-8">
                 {(() => {
-                  const viewerSrc = documentData.fileUrl.includes('firebasestorage.googleapis.com') 
-                    ? documentData.fileUrl 
-                    : `/api/proxy-pdf?url=${encodeURIComponent(documentData.fileUrl)}`;
+                  const viewerSrc = `/api/proxy-pdf?url=${encodeURIComponent(documentData.fileUrl)}`;
                   
                   console.log("Document ID:", id);
                   console.log("Resolved document:", documentData);
