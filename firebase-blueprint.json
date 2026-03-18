@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the data room",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "viewer"] },
+        "name": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "AllowedEmail": {
+      "title": "AllowedEmail",
+      "description": "An email address allowed to access the data room",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "addedAt": { "type": "string", "format": "date-time" },
+        "addedBy": { "type": "string" }
+      },
+      "required": ["email", "addedAt", "addedBy"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "A document in the data room",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "fileType": { "type": "string" },
+        "uploadedAt": { "type": "string", "format": "date-time" },
+        "uploadedBy": { "type": "string" },
+        "size": { "type": "number" },
+        "allowDownload": { "type": "boolean" }
+      },
+      "required": ["title", "fileUrl", "fileType", "uploadedAt", "uploadedBy"]
+    },
+    "Analytics": {
+      "title": "Analytics",
+      "description": "Analytics event for a document",
+      "type": "object",
+      "properties": {
+        "documentId": { "type": "string" },
+        "userId": { "type": "string" },
+        "action": { "type": "string", "enum": ["view", "download"] },
+        "durationSeconds": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["documentId", "userId", "action", "timestamp"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A message sent from a viewer to the admin",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["senderId", "text", "timestamp", "isRead"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/allowedEmails/{emailId}": {
+      "schema": { "$ref": "#/entities/AllowedEmail" },
+      "description": "Emails allowed to access the data room"
+    },
+    "/documents/{documentId}": {
+      "schema": { "$ref": "#/entities/Document" },
+      "description": "Documents uploaded by the admin"
+    },
+    "/analytics/{analyticsId}": {
+      "schema": { "$ref": "#/entities/Analytics" },
+      "description": "Analytics events"
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Messages sent to the admin"
+    }
+  }
+}

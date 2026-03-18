@@ -1,0 +1,112 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "gt.elysium@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+    function isViewer() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'viewer';
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // Domain Validators
+    function isValidUser() {
+      return hasOnlyAllowedFields(['uid', 'email', 'role', 'name']) &&
+             request.resource.data.uid is string && request.resource.data.uid.size() < 100 &&
+             request.resource.data.email is string && isValidEmail(request.resource.data.email) &&
+             request.resource.data.role in ['admin', 'viewer'] &&
+             (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() < 100));
+    }
+
+    function isValidAllowedEmail() {
+      return hasOnlyAllowedFields(['email', 'addedAt', 'addedBy']) &&
+             request.resource.data.email is string && isValidEmail(request.resource.data.email) &&
+             request.resource.data.addedAt is string && request.resource.data.addedAt.size() < 50 &&
+             request.resource.data.addedBy is string && request.resource.data.addedBy.size() < 100;
+    }
+
+    function isValidDocument() {
+      return hasOnlyAllowedFields(['title', 'description', 'fileUrl', 'fileType', 'uploadedAt', 'uploadedBy', 'size', 'allowDownload']) &&
+             request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() < 200 &&
+             (!('description' in request.resource.data) || (request.resource.data.description is string && request.resource.data.description.size() < 1000)) &&
+             request.resource.data.fileUrl is string && request.resource.data.fileUrl.size() < 10000000 && // allow large base64 strings
+             request.resource.data.fileType is string && request.resource.data.fileType.size() < 100 &&
+             request.resource.data.uploadedAt is string && request.resource.data.uploadedAt.size() < 50 &&
+             request.resource.data.uploadedBy is string && request.resource.data.uploadedBy.size() < 100 &&
+             (!('size' in request.resource.data) || request.resource.data.size is number) &&
+             (!('allowDownload' in request.resource.data) || request.resource.data.allowDownload is bool);
+    }
+
+    function isValidAnalytics() {
+      return hasOnlyAllowedFields(['documentId', 'userId', 'action', 'durationSeconds', 'timestamp']) &&
+             request.resource.data.documentId is string && request.resource.data.documentId.size() < 100 &&
+             request.resource.data.userId is string && request.resource.data.userId.size() < 100 &&
+             request.resource.data.action in ['view', 'download'] &&
+             (!('durationSeconds' in request.resource.data) || request.resource.data.durationSeconds is number) &&
+             request.resource.data.timestamp is string && request.resource.data.timestamp.size() < 50;
+    }
+
+    function isValidMessage() {
+      return hasOnlyAllowedFields(['senderId', 'text', 'timestamp', 'isRead']) &&
+             request.resource.data.senderId is string && request.resource.data.senderId.size() < 100 &&
+             request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() < 2000 &&
+             request.resource.data.timestamp is string && request.resource.data.timestamp.size() < 50 &&
+             request.resource.data.isRead is bool;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser() &&
+                    ((request.resource.data.role == 'admin' && isAdmin()) ||
+                     (request.resource.data.role == 'viewer' && exists(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email))));
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser() &&
+                    ((request.resource.data.role == resource.data.role) || isAdmin());
+    }
+
+    match /allowedEmails/{emailId} {
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.token.email == emailId);
+      allow create, update: if isAdmin() && isValidAllowedEmail();
+      allow delete: if isAdmin();
+    }
+
+    match /documents/{documentId} {
+      allow read: if isAdmin() || isViewer();
+      allow create, update: if isAdmin() && isValidDocument();
+      allow delete: if isAdmin();
+    }
+
+    match /analytics/{analyticsId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidAnalytics();
+      allow update: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidAnalytics() &&
+                    request.resource.data.documentId == resource.data.documentId &&
+                    request.resource.data.userId == resource.data.userId &&
+                    request.resource.data.action == resource.data.action &&
+                    request.resource.data.timestamp == resource.data.timestamp;
+    }
+
+    match /messages/{messageId} {
+      allow read: if isAdmin() || isOwner(resource.data.senderId);
+      allow create: if isAuthenticated() && isOwner(request.resource.data.senderId) && isValidMessage();
+      allow update: if isAdmin() && isValidMessage() &&
+                    request.resource.data.senderId == resource.data.senderId &&
+                    request.resource.data.text == resource.data.text &&
+                    request.resource.data.timestamp == resource.data.timestamp;
+    }
+  }
+}
