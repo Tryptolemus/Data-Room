@@ -203,13 +203,24 @@ export default function DocumentViewer() {
 
             {isPdf ? (
               <div className="flex flex-col items-center py-8">
-                <Document
-                  file={`/api/proxy-pdf?url=${encodeURIComponent(documentData.fileUrl)}`}
-                  onLoadSuccess={onDocumentLoadSuccess}
-                  onLoadError={(error) => {
-                    console.error('Error while loading document!', error);
-                    setPdfError(error);
-                  }}
+                {(() => {
+                  const viewerSrc = documentData.fileUrl.includes('firebasestorage.googleapis.com') 
+                    ? documentData.fileUrl 
+                    : `/api/proxy-pdf?url=${encodeURIComponent(documentData.fileUrl)}`;
+                  
+                  console.log("Document ID:", id);
+                  console.log("Resolved document:", documentData);
+                  console.log("PDF URL:", documentData.fileUrl);
+                  console.log("Viewer src:", viewerSrc);
+
+                  return (
+                    <Document
+                      file={viewerSrc}
+                      onLoadSuccess={onDocumentLoadSuccess}
+                      onLoadError={(error) => {
+                        console.error('Error while loading document!', error);
+                        setPdfError(error);
+                      }}
                   loading={<Loader2 className="w-8 h-8 animate-spin text-zinc-400 my-12" />}
                   error={
                     <div className="flex flex-col items-center justify-center p-12 text-center">
@@ -230,7 +241,9 @@ export default function DocumentViewer() {
                       />
                     </div>
                   ))}
-                </Document>
+                    </Document>
+                  );
+                })()}
               </div>
             ) : isImage ? (
               <img 
