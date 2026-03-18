@@ -9,7 +9,10 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
 // Set up PDF.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
 
 export default function DocumentViewer() {
   const { id } = useParams<{ id: string }>();
@@ -34,12 +37,16 @@ export default function DocumentViewer() {
           
           // Log view event
           if (profile) {
-            await addDoc(collection(db, 'analytics'), {
-              documentId: id,
-              userId: profile.email,
-              action: 'view',
-              timestamp: new Date().toISOString()
-            });
+            try {
+              await addDoc(collection(db, 'analytics'), {
+                documentId: id,
+                userId: profile.email,
+                action: 'view',
+                timestamp: new Date().toISOString()
+              });
+            } catch (analyticsError) {
+              console.error('Failed to log analytics view:', analyticsError);
+            }
           }
         } else {
           setError('Document not found or you do not have permission to view it.');
@@ -144,12 +151,16 @@ export default function DocumentViewer() {
             <button
               onClick={async () => {
                 if (profile && id) {
-                  await addDoc(collection(db, 'analytics'), {
-                    documentId: id,
-                    userId: profile.email,
-                    action: 'download',
-                    timestamp: new Date().toISOString()
-                  });
+                  try {
+                    await addDoc(collection(db, 'analytics'), {
+                      documentId: id,
+                      userId: profile.email,
+                      action: 'download',
+                      timestamp: new Date().toISOString()
+                    });
+                  } catch (analyticsError) {
+                    console.error('Failed to log analytics download:', analyticsError);
+                  }
                 }
                 window.open(documentData.fileUrl, '_blank');
               }}
@@ -178,8 +189,16 @@ export default function DocumentViewer() {
             {/* Watermark Overlay */}
             <div className="absolute inset-0 z-40 pointer-events-none overflow-hidden opacity-10 flex flex-wrap items-center justify-center gap-12 p-12">
               {Array.from({ length: 20 }).map((_, i) => (
-                <div key={i} className="transform -rotate-45 text-black font-bold text-2xl whitespace-nowrap">
-                  {profile?.email} <br/> {new Date().toISOString().split('T')[0]}
+                <div key={i} className="transform -rotate-45 flex flex-col items-center justify-center">
+                  <img 
+                    src="https://olive-characteristic-crab-262.mypinata.cloud/ipfs/bafkreicpn2jxtbgciiq3bovhukqg6iixbckc632vgj6blvc2xo7ldfahzm" 
+                    alt="Watermark"
+                    className="w-48 h-auto mb-2"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="text-black font-bold text-xl whitespace-nowrap text-center">
+                    {profile?.email} <br/> {new Date().toISOString().split('T')[0]}
+                  </div>
                 </div>
               ))}
             </div>
@@ -187,8 +206,9 @@ export default function DocumentViewer() {
             {isPdf ? (
               <div className="flex flex-col items-center py-8">
                 <Document
-                  file={documentData.fileUrl}
+                  file={`/api/proxy-pdf?url=${encodeURIComponent(documentData.fileUrl)}`}
                   onLoadSuccess={onDocumentLoadSuccess}
+                  onLoadError={(error) => console.error('Error while loading document!', error)}
                   loading={<Loader2 className="w-8 h-8 animate-spin text-zinc-400 my-12" />}
                   className="flex flex-col items-center gap-8"
                 >

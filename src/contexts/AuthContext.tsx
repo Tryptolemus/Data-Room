@@ -88,9 +88,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Login error:', err);
-      setError('Failed to login with Google.');
+      if (err?.code === 'auth/unauthorized-domain') {
+        setError(`Domain not authorized. Please add "${window.location.hostname}" to your Firebase Console -> Authentication -> Settings -> Authorized domains.`);
+      } else {
+        setError('Failed to login with Google. ' + (err?.message || ''));
+      }
     }
   };
 

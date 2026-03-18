@@ -17,6 +17,9 @@ service cloud.firestore {
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
+    function isEmailOwner(email) {
+      return isAuthenticated() && request.auth.token.email == email;
+    }
     function hasOnlyAllowedFields(fields) {
       return request.resource.data.keys().hasOnly(fields);
     }
@@ -92,8 +95,8 @@ service cloud.firestore {
 
     match /analytics/{analyticsId} {
       allow read: if isAdmin();
-      allow create: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidAnalytics();
-      allow update: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidAnalytics() &&
+      allow create: if isAuthenticated() && isEmailOwner(request.resource.data.userId) && isValidAnalytics();
+      allow update: if isAuthenticated() && isEmailOwner(request.resource.data.userId) && isValidAnalytics() &&
                     request.resource.data.documentId == resource.data.documentId &&
                     request.resource.data.userId == resource.data.userId &&
                     request.resource.data.action == resource.data.action &&
@@ -101,8 +104,8 @@ service cloud.firestore {
     }
 
     match /messages/{messageId} {
-      allow read: if isAdmin() || isOwner(resource.data.senderId);
-      allow create: if isAuthenticated() && isOwner(request.resource.data.senderId) && isValidMessage();
+      allow read: if isAdmin() || isEmailOwner(resource.data.senderId);
+      allow create: if isAuthenticated() && isEmailOwner(request.resource.data.senderId) && isValidMessage();
       allow update: if isAdmin() && isValidMessage() &&
                     request.resource.data.senderId == resource.data.senderId &&
                     request.resource.data.text == resource.data.text &&
