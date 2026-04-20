@@ -67,10 +67,20 @@ service cloud.firestore {
     }
 
     function isValidAllowedEmail() {
-      return hasOnlyAllowedFields(['email', 'addedAt', 'addedBy']) &&
+      return hasOnlyAllowedFields(['email', 'addedAt', 'addedBy', 'canViewAnalytics']) &&
              request.resource.data.email is string && isValidEmail(request.resource.data.email) &&
              request.resource.data.addedAt is string && request.resource.data.addedAt.size() < 50 &&
-             request.resource.data.addedBy is string && request.resource.data.addedBy.size() < 100;
+             request.resource.data.addedBy is string && request.resource.data.addedBy.size() < 100 &&
+             (!('canViewAnalytics' in request.resource.data) || request.resource.data.canViewAnalytics is bool);
+    }
+
+    function canViewAnalytics() {
+      return isAdmin() || (
+        isAuthenticated() &&
+        exists(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)) &&
+        'canViewAnalytics' in get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data &&
+        get(/databases/$(database)/documents/allowedEmails/$(request.auth.token.email)).data.canViewAnalytics == true
+      );
     }
 
     function isValidProject() {
@@ -177,6 +187,7 @@ service cloud.firestore {
 
     match /analytics/{analyticsId} {
       allow read: if isAdmin() || (
+        canViewAnalytics() &&
         'projectId' in resource.data && hasProjectAccess(resource.data.projectId)
       );
       allow create: if isAuthenticated() && isEmailOwner(request.resource.data.userId) && isValidAnalytics();

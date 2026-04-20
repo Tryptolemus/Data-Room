@@ -116,3 +116,32 @@ export const useAuth = () => {
   if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
+
+export function useCanViewAnalytics(): boolean | null {
+  const { profile } = useAuth();
+  const [canView, setCanView] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!profile) {
+      setCanView(null);
+      return;
+    }
+    if (profile.role === 'admin') {
+      setCanView(true);
+      return;
+    }
+    let cancelled = false;
+    getDoc(doc(db, 'allowedEmails', profile.email))
+      .then((snap) => {
+        if (cancelled) return;
+        const data = snap.exists() ? (snap.data() as any) : null;
+        setCanView(!!data?.canViewAnalytics);
+      })
+      .catch(() => {
+        if (!cancelled) setCanView(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
+  return canView;
+}

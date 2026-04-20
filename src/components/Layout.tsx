@@ -1,23 +1,20 @@
 import React from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, useCanViewAnalytics } from '../contexts/AuthContext';
 import { LogOut, ShieldCheck, FileText, Users, Activity, MessageSquare } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { profile, logout } = useAuth();
+  const canViewAnalytics = useCanViewAnalytics();
   const location = useLocation();
 
   const isAdmin = profile?.role === 'admin';
 
-  const navItems = isAdmin ? [
+  const navItems = [
     { name: 'Documents', href: '/', icon: FileText },
-    { name: 'Access Control', href: '/access', icon: Users },
-    { name: 'Analytics', href: '/analytics', icon: Activity },
-    { name: 'Messages', href: '/messages', icon: MessageSquare },
-  ] : [
-    { name: 'Documents', href: '/', icon: FileText },
-    { name: 'Analytics', href: '/analytics', icon: Activity },
+    ...(isAdmin ? [{ name: 'Access Control', href: '/access', icon: Users }] : []),
+    ...(canViewAnalytics ? [{ name: 'Analytics', href: '/analytics', icon: Activity }] : []),
     { name: 'Messages', href: '/messages', icon: MessageSquare },
   ];
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, useCanViewAnalytics } from '../contexts/AuthContext';
 import { db } from '../firebase';
+import { Navigate } from 'react-router-dom';
 import {
   collection,
   query,
@@ -34,6 +35,7 @@ interface AnalyticsEvent {
 export default function Analytics() {
   const { profile } = useAuth();
   const isGlobalAdmin = profile?.role === 'admin';
+  const canViewAnalytics = useCanViewAnalytics();
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -148,6 +150,17 @@ export default function Analytics() {
     const secs = seconds % 60;
     return `${mins}m ${secs}s`;
   };
+
+  if (canViewAnalytics === null) {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
+      </div>
+    );
+  }
+  if (!canViewAnalytics) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="space-y-6">

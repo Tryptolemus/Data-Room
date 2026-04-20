@@ -131,6 +131,17 @@ export default function AccessControl() {
     }
   };
 
+  const toggleAnalyticsAccess = async (emailId: string, next: boolean) => {
+    try {
+      await updateDoc(doc(db, 'allowedEmails', emailId), {
+        canViewAnalytics: next,
+      });
+    } catch (err: any) {
+      console.error('Error toggling analytics access:', err);
+      alert('Failed to update analytics access: ' + (err?.message || 'unknown error'));
+    }
+  };
+
   const cascadeToNonRestrictedDocs = async (
     projectId: string,
     op: 'add' | 'remove',
@@ -275,21 +286,32 @@ export default function AccessControl() {
             <ul className="divide-y divide-zinc-200">
               {emails.map((item) => (
                 <li key={item.id} className="hover:bg-zinc-50 transition-colors">
-                  <div className="px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
+                  <div className="px-6 py-4 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-4 min-w-0 flex-1">
+                      <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 flex-shrink-0">
                         <Shield className="w-5 h-5" />
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-zinc-900">{item.email}</p>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-zinc-900 truncate">{item.email}</p>
                         <p className="text-xs text-zinc-500 mt-0.5">
                           Added {format(new Date(item.addedAt), 'MMM d, yyyy')} by {item.addedBy}
                         </p>
                       </div>
                     </div>
+                    <label
+                      className="flex items-center gap-2 text-xs text-zinc-600 cursor-pointer select-none"
+                      title="Allow this user to see the Analytics tab. Data is still scoped to projects they can access."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!item.canViewAnalytics}
+                        onChange={(e) => toggleAnalyticsAccess(item.id, e.target.checked)}
+                      />
+                      Analytics
+                    </label>
                     <button
                       onClick={() => setEmailToDelete(item.id)}
-                      className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
+                      className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors flex-shrink-0"
                       title="Revoke Access"
                     >
                       <Trash2 className="w-4 h-4" />
