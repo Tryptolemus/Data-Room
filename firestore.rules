@@ -26,6 +26,16 @@ service cloud.firestore {
     function isValidEmail(email) {
       return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
+    function projectData(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)).data;
+    }
+    function hasProjectAccess(projectId) {
+      return isAdmin() || (
+        isAuthenticated() &&
+        exists(/databases/$(database)/documents/projects/$(projectId)) &&
+        request.auth.token.email in projectData(projectId).allowedEmails
+      );
+    }
 
     // Domain Validators
     function isValidUser() {
@@ -43,8 +53,26 @@ service cloud.firestore {
              request.resource.data.addedBy is string && request.resource.data.addedBy.size() < 100;
     }
 
+    function isValidProject() {
+      return hasOnlyAllowedFields(['name', 'description', 'createdAt', 'createdBy', 'allowedEmails']) &&
+             request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() < 200 &&
+             (!('description' in request.resource.data) || (request.resource.data.description is string && request.resource.data.description.size() < 1000)) &&
+             request.resource.data.createdAt is string && request.resource.data.createdAt.size() < 50 &&
+             request.resource.data.createdBy is string && request.resource.data.createdBy.size() < 100 &&
+             request.resource.data.allowedEmails is list;
+    }
+
+    function isValidFolder() {
+      return hasOnlyAllowedFields(['name', 'projectId', 'parentFolderId', 'createdAt', 'createdBy']) &&
+             request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() < 200 &&
+             request.resource.data.projectId is string && request.resource.data.projectId.size() < 100 &&
+             (request.resource.data.parentFolderId == null || (request.resource.data.parentFolderId is string && request.resource.data.parentFolderId.size() < 100)) &&
+             request.resource.data.createdAt is string && request.resource.data.createdAt.size() < 50 &&
+             request.resource.data.createdBy is string && request.resource.data.createdBy.size() < 100;
+    }
+
     function isValidDocument() {
-      return hasOnlyAllowedFields(['title', 'description', 'fileUrl', 'fileType', 'uploadedAt', 'uploadedBy', 'size', 'allowDownload']) &&
+      return hasOnlyAllowedFields(['title', 'description', 'fileUrl', 'fileType', 'uploadedAt', 'uploadedBy', 'size', 'allowDownload', 'projectId', 'folderId']) &&
              request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() < 200 &&
              (!('description' in request.resource.data) || (request.resource.data.description is string && request.resource.data.description.size() < 1000)) &&
              request.resource.data.fileUrl is string && request.resource.data.fileUrl.size() < 10000000 && // allow large base64 strings
@@ -52,7 +80,9 @@ service cloud.firestore {
              request.resource.data.uploadedAt is string && request.resource.data.uploadedAt.size() < 50 &&
              request.resource.data.uploadedBy is string && request.resource.data.uploadedBy.size() < 100 &&
              (!('size' in request.resource.data) || request.resource.data.size is number) &&
-             (!('allowDownload' in request.resource.data) || request.resource.data.allowDownload is bool);
+             (!('allowDownload' in request.resource.data) || request.resource.data.allowDownload is bool) &&
+             (!('projectId' in request.resource.data) || (request.resource.data.projectId is string && request.resource.data.projectId.size() < 100)) &&
+             (!('folderId' in request.resource.data) || request.resource.data.folderId == null || (request.resource.data.folderId is string && request.resource.data.folderId.size() < 100));
     }
 
     function isValidAnalytics() {
@@ -87,8 +117,22 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /projects/{projectId} {
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.token.email in resource.data.allowedEmails);
+      allow create, update: if isAdmin() && isValidProject();
+      allow delete: if isAdmin();
+    }
+
+    match /folders/{folderId} {
+      allow read: if isAdmin() || hasProjectAccess(resource.data.projectId);
+      allow create: if isAdmin() && isValidFolder();
+      allow update: if isAdmin() && isValidFolder() &&
+                    request.resource.data.projectId == resource.data.projectId;
+      allow delete: if isAdmin();
+    }
+
     match /documents/{documentId} {
-      allow read: if isAdmin() || isViewer();
+      allow read: if isAdmin() || ('projectId' in resource.data && hasProjectAccess(resource.data.projectId));
       allow create, update: if isAdmin() && isValidDocument();
       allow delete: if isAdmin();
     }

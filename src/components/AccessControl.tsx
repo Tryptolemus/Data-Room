@@ -1,9 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebase';
-import { collection, query, onSnapshot, setDoc, deleteDoc, doc, orderBy } from 'firebase/firestore';
-import { UserPlus, Trash2, Shield, Loader2, AlertTriangle } from 'lucide-react';
+import {
+  collection,
+  query,
+  onSnapshot,
+  setDoc,
+  deleteDoc,
+  doc,
+  orderBy,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
+} from 'firebase/firestore';
+import {
+  UserPlus,
+  Trash2,
+  Shield,
+  Loader2,
+  AlertTriangle,
+  FolderOpen,
+  ChevronDown,
+  ChevronRight,
+  X,
+} from 'lucide-react';
 import { format } from 'date-fns';
+
+interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  createdBy: string;
+  allowedEmails: string[];
+}
 
 export default function AccessControl() {
   const { profile } = useAuth();
@@ -13,11 +43,26 @@ export default function AccessControl() {
   const [adding, setAdding] = useState(false);
   const [emailToDelete, setEmailToDelete] = useState<string | null>(null);
 
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+
   useEffect(() => {
     const q = query(collection(db, 'allowedEmails'), orderBy('addedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setEmails(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setEmails(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setProjects(
+        snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Project[]
+      );
+      setProjectsLoading(false);
     });
     return () => unsubscribe();
   }, []);
@@ -25,14 +70,13 @@ export default function AccessControl() {
   const handleAddEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEmail || !profile) return;
-
     setAdding(true);
     try {
       const emailLower = newEmail.toLowerCase().trim();
       await setDoc(doc(db, 'allowedEmails', emailLower), {
         email: emailLower,
         addedAt: new Date().toISOString(),
-        addedBy: profile.email
+        addedBy: profile.email,
       });
       setNewEmail('');
     } catch (error) {
@@ -53,79 +97,161 @@ export default function AccessControl() {
     }
   };
 
+  const addEmailToProject = async (projectId: string, email: string) => {
+    const emailLower = email.toLowerCase().trim();
+    if (!emailLower) return;
+    try {
+      await updateDoc(doc(db, 'projects', projectId), {
+        allowedEmails: arrayUnion(emailLower),
+      });
+    } catch (err) {
+      console.error('Error adding email to project:', err);
+      alert('Failed to grant project access.');
+    }
+  };
+
+  const removeEmailFromProject = async (projectId: string, email: string) => {
+    try {
+      await updateDoc(doc(db, 'projects', projectId), {
+        allowedEmails: arrayRemove(email),
+      });
+    } catch (err) {
+      console.error('Error removing email from project:', err);
+    }
+  };
+
   return (
-    <div className="space-y-6 relative">
+    <div className="space-y-8 relative">
       <div>
         <h1 className="text-2xl font-bold text-zinc-900">Access Control</h1>
         <p className="text-sm text-zinc-500 mt-1">
-          Manage who has access to the data room. Only authorized emails can sign in.
+          Manage who can sign in and which projects each person can see.
         </p>
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-zinc-200">
-        <form onSubmit={handleAddEmail} className="flex gap-4">
-          <div className="flex-1">
-            <label htmlFor="email" className="sr-only">Email address</label>
-            <input
-              type="email"
-              id="email"
-              required
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              className="block w-full rounded-lg border-zinc-300 shadow-sm focus:ring-zinc-500 focus:border-zinc-500 sm:text-sm px-4 py-2 border"
-              placeholder="Enter email address to authorize"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={adding || !newEmail}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-zinc-900 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-zinc-900 disabled:opacity-50 transition-colors"
-          >
-            {adding ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserPlus className="w-4 h-4 mr-2" />}
-            Authorize Email
-          </button>
-        </form>
-      </div>
+      {/* Global sign-in access */}
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-900">Authorized Emails</h2>
+          <p className="text-xs text-zinc-500 mt-1">
+            Only these emails can sign in to the data room. Granting project access still requires
+            the email to be authorized here.
+          </p>
+        </div>
 
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-zinc-200">
+          <form onSubmit={handleAddEmail} className="flex gap-4">
+            <div className="flex-1">
+              <label htmlFor="email" className="sr-only">
+                Email address
+              </label>
+              <input
+                type="email"
+                id="email"
+                required
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                className="block w-full rounded-lg border-zinc-300 shadow-sm focus:ring-zinc-500 focus:border-zinc-500 sm:text-sm px-4 py-2 border"
+                placeholder="Enter email address to authorize"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={adding || !newEmail}
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-zinc-900 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-zinc-900 disabled:opacity-50 transition-colors"
+            >
+              {adding ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <UserPlus className="w-4 h-4 mr-2" />
+              )}
+              Authorize Email
+            </button>
+          </form>
         </div>
-      ) : (
-        <div className="bg-white shadow-sm rounded-2xl border border-zinc-200 overflow-hidden">
-          <ul className="divide-y divide-zinc-200">
-            {emails.map((item) => (
-              <li key={item.id} className="hover:bg-zinc-50 transition-colors">
-                <div className="px-6 py-4 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
-                      <Shield className="w-5 h-5" />
+
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
+          </div>
+        ) : (
+          <div className="bg-white shadow-sm rounded-2xl border border-zinc-200 overflow-hidden">
+            <ul className="divide-y divide-zinc-200">
+              {emails.map((item) => (
+                <li key={item.id} className="hover:bg-zinc-50 transition-colors">
+                  <div className="px-6 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
+                        <Shield className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-zinc-900">{item.email}</p>
+                        <p className="text-xs text-zinc-500 mt-0.5">
+                          Added {format(new Date(item.addedAt), 'MMM d, yyyy')} by {item.addedBy}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-zinc-900">{item.email}</p>
-                      <p className="text-xs text-zinc-500 mt-0.5">
-                        Added {format(new Date(item.addedAt), 'MMM d, yyyy')} by {item.addedBy}
-                      </p>
-                    </div>
+                    <button
+                      onClick={() => setEmailToDelete(item.id)}
+                      className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
+                      title="Revoke Access"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => setEmailToDelete(item.id)}
-                    className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
-                    title="Revoke Access"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </li>
-            ))}
-            {emails.length === 0 && (
-              <li className="px-6 py-12 text-center text-zinc-500 text-sm">
-                No authorized emails yet. Add an email above to grant access.
-              </li>
-            )}
-          </ul>
+                </li>
+              ))}
+              {emails.length === 0 && (
+                <li className="px-6 py-12 text-center text-zinc-500 text-sm">
+                  No authorized emails yet. Add an email above to grant access.
+                </li>
+              )}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      {/* Per-project access */}
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-900">Project Access</h2>
+          <p className="text-xs text-zinc-500 mt-1">
+            A project only appears in a user&apos;s data room if their email is listed here. Create
+            projects from the Documents page.
+          </p>
         </div>
-      )}
+
+        {projectsLoading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
+          </div>
+        ) : projects.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-zinc-200 border-dashed p-8 text-center">
+            <FolderOpen className="mx-auto h-10 w-10 text-zinc-300" />
+            <p className="mt-2 text-sm text-zinc-500">
+              No projects yet. Create a project from the Documents page.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm overflow-hidden">
+            <ul className="divide-y divide-zinc-200">
+              {projects.map((p) => (
+                <ProjectAccessRow
+                  key={p.id}
+                  project={p}
+                  expanded={expandedProjectId === p.id}
+                  onToggle={() =>
+                    setExpandedProjectId((cur) => (cur === p.id ? null : p.id))
+                  }
+                  onAddEmail={(email) => addEmailToProject(p.id, email)}
+                  onRemoveEmail={(email) => removeEmailFromProject(p.id, email)}
+                  authorizedEmails={emails.map((e) => e.email)}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
 
       {/* Delete Confirmation Modal */}
       {emailToDelete && (
@@ -136,7 +262,8 @@ export default function AccessControl() {
               <h3 className="text-lg font-semibold text-zinc-900">Revoke Access</h3>
             </div>
             <p className="text-sm text-zinc-600 mb-6">
-              Are you sure you want to revoke access for this email? They will no longer be able to sign in.
+              Are you sure you want to revoke access for this email? They will no longer be able to
+              sign in.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -156,5 +283,133 @@ export default function AccessControl() {
         </div>
       )}
     </div>
+  );
+}
+
+function ProjectAccessRow({
+  project,
+  expanded,
+  onToggle,
+  onAddEmail,
+  onRemoveEmail,
+  authorizedEmails,
+}: {
+  project: Project;
+  expanded: boolean;
+  onToggle: () => void;
+  onAddEmail: (email: string) => Promise<void>;
+  onRemoveEmail: (email: string) => Promise<void>;
+  authorizedEmails: string[];
+}) {
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const members = project.allowedEmails || [];
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = input.toLowerCase().trim();
+    if (!email) return;
+    setBusy(true);
+    await onAddEmail(email);
+    setBusy(false);
+    setInput('');
+  };
+
+  return (
+    <li>
+      <button
+        onClick={onToggle}
+        className="w-full px-6 py-4 flex items-center justify-between hover:bg-zinc-50 transition-colors text-left"
+      >
+        <div className="flex items-center gap-3">
+          {expanded ? (
+            <ChevronDown className="w-4 h-4 text-zinc-500" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-zinc-500" />
+          )}
+          <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
+            <FolderOpen className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-zinc-900">{project.name}</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {members.length} member{members.length === 1 ? '' : 's'}
+            </p>
+          </div>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="px-6 pb-5 pt-1 bg-zinc-50 border-t border-zinc-200">
+          <form onSubmit={handleAdd} className="flex gap-2 mt-4">
+            <input
+              type="email"
+              list={`authorized-emails-${project.id}`}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="email@example.com"
+              className="flex-1 rounded-lg border-zinc-300 focus:ring-zinc-500 focus:border-zinc-500 text-sm px-3 py-2 border"
+            />
+            <datalist id={`authorized-emails-${project.id}`}>
+              {authorizedEmails
+                .filter((e) => !members.includes(e))
+                .map((e) => (
+                  <option key={e} value={e} />
+                ))}
+            </datalist>
+            <button
+              type="submit"
+              disabled={busy || !input.trim()}
+              className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              <UserPlus className="w-4 h-4 mr-1.5" /> Grant
+            </button>
+          </form>
+
+          {members.length === 0 ? (
+            <p className="text-xs text-zinc-500 mt-4">
+              No one has access to this project yet.
+            </p>
+          ) : (
+            <ul className="mt-4 space-y-1">
+              {members.map((email) => {
+                const authorized = authorizedEmails.includes(email);
+                return (
+                  <li
+                    key={email}
+                    className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-zinc-200"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Shield
+                        className={`w-4 h-4 flex-shrink-0 ${
+                          authorized ? 'text-emerald-600' : 'text-amber-500'
+                        }`}
+                      />
+                      <span className="text-sm text-zinc-800 truncate">{email}</span>
+                      {!authorized && (
+                        <span
+                          className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5"
+                          title="Not in global authorized list — will be unable to sign in"
+                        >
+                          Not authorized
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => onRemoveEmail(email)}
+                      className="p-1.5 rounded-full text-red-600 hover:bg-red-50"
+                      title="Remove access"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
