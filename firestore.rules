@@ -63,16 +63,17 @@ service cloud.firestore {
     }
 
     function isValidFolder() {
-      return hasOnlyAllowedFields(['name', 'projectId', 'parentFolderId', 'createdAt', 'createdBy']) &&
+      return hasOnlyAllowedFields(['name', 'projectId', 'parentFolderId', 'createdAt', 'createdBy', 'order']) &&
              request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() < 200 &&
              request.resource.data.projectId is string && request.resource.data.projectId.size() < 100 &&
              (request.resource.data.parentFolderId == null || (request.resource.data.parentFolderId is string && request.resource.data.parentFolderId.size() < 100)) &&
              request.resource.data.createdAt is string && request.resource.data.createdAt.size() < 50 &&
-             request.resource.data.createdBy is string && request.resource.data.createdBy.size() < 100;
+             request.resource.data.createdBy is string && request.resource.data.createdBy.size() < 100 &&
+             (!('order' in request.resource.data) || request.resource.data.order is number);
     }
 
     function isValidDocument() {
-      return hasOnlyAllowedFields(['title', 'description', 'fileUrl', 'fileType', 'uploadedAt', 'uploadedBy', 'size', 'allowDownload', 'projectId', 'folderId']) &&
+      return hasOnlyAllowedFields(['title', 'description', 'fileUrl', 'fileType', 'uploadedAt', 'uploadedBy', 'size', 'allowDownload', 'projectId', 'folderId', 'visibility', 'allowedEmails', 'order']) &&
              request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() < 200 &&
              (!('description' in request.resource.data) || (request.resource.data.description is string && request.resource.data.description.size() < 1000)) &&
              request.resource.data.fileUrl is string && request.resource.data.fileUrl.size() < 10000000 && // allow large base64 strings
@@ -82,7 +83,10 @@ service cloud.firestore {
              (!('size' in request.resource.data) || request.resource.data.size is number) &&
              (!('allowDownload' in request.resource.data) || request.resource.data.allowDownload is bool) &&
              (!('projectId' in request.resource.data) || (request.resource.data.projectId is string && request.resource.data.projectId.size() < 100)) &&
-             (!('folderId' in request.resource.data) || request.resource.data.folderId == null || (request.resource.data.folderId is string && request.resource.data.folderId.size() < 100));
+             (!('folderId' in request.resource.data) || request.resource.data.folderId == null || (request.resource.data.folderId is string && request.resource.data.folderId.size() < 100)) &&
+             (!('visibility' in request.resource.data) || request.resource.data.visibility in ['project', 'restricted']) &&
+             (!('allowedEmails' in request.resource.data) || request.resource.data.allowedEmails is list) &&
+             (!('order' in request.resource.data) || request.resource.data.order is number);
     }
 
     function isValidAnalytics() {
@@ -132,7 +136,10 @@ service cloud.firestore {
     }
 
     match /documents/{documentId} {
-      allow read: if isAdmin() || ('projectId' in resource.data && hasProjectAccess(resource.data.projectId));
+      allow read: if isAdmin() || (
+        'allowedEmails' in resource.data &&
+        request.auth.token.email in resource.data.allowedEmails
+      );
       allow create, update: if isAdmin() && isValidDocument();
       allow delete: if isAdmin();
     }

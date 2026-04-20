@@ -37,10 +37,20 @@ import {
   Move,
   GripVertical,
   Pencil,
+  EyeOff,
+  Users,
 } from 'lucide-react';
 
 const naturalCompare = (a: string, b: string) =>
   a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
+function nextOrderValue<T extends { order?: number }>(items: T[]): number {
+  const max = items.reduce(
+    (acc, x) => (typeof x.order === 'number' && x.order > acc ? x.order : acc),
+    0
+  );
+  return max + 1000;
+}
 import { format } from 'date-fns';
 import { Link, useSearchParams } from 'react-router-dom';
 
@@ -60,6 +70,7 @@ interface FolderItem {
   parentFolderId: string | null;
   createdAt: string;
   createdBy: string;
+  order?: number;
 }
 
 interface DocumentItem {
@@ -74,6 +85,9 @@ interface DocumentItem {
   allowDownload?: boolean;
   projectId?: string;
   folderId?: string | null;
+  visibility?: 'project' | 'restricted';
+  allowedEmails?: string[];
+  order?: number;
 }
 
 export default function Documents() {
@@ -109,6 +123,8 @@ export default function Documents() {
     | { kind: 'folder'; id: string; currentName: string }
     | { kind: 'document'; id: string; currentName: string };
   const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
+
+  const [visibilityTarget, setVisibilityTarget] = useState<DocumentItem | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -243,9 +259,11 @@ export default function Documents() {
 
   // ---- Drag & drop (admin only) ----
   type DragItem = { type: 'document' | 'folder'; id: string };
+  type DropZone =
+    | { kind: 'into'; id: string | 'root' }
+    | { kind: 'before' | 'after'; id: string; rowType: 'folder' | 'document' };
   const [dragging, setDragging] = useState<DragItem | null>(null);
-  // `'root'` = project root, otherwise a folder id.
-  const [dragOver, setDragOver] = useState<string | null>(null);
+  const [dropZone, setDropZone] = useState<DropZone | null>(null);
   const [docToMigrate, setDocToMigrate] = useState<DocumentItem | null>(null);
 
   const isFolderDescendantOf = (candidateId: string, ancestorId: string): boolean => {
@@ -281,6 +299,22 @@ export default function Documents() {
     }
   };
 
+  const updateVisibility = async (
+    docId: string,
+    visibility: 'project' | 'restricted',
+    allowedEmails: string[]
+  ) => {
+    try {
+      await updateDoc(doc(db, 'documents', docId), {
+        visibility,
+        allowedEmails,
+      });
+    } catch (err: any) {
+      console.error('Error updating visibility:', err);
+      alert('Failed to update visibility: ' + (err?.message || 'unknown error'));
+    }
+  };
+
   const renameItem = async (target: RenameTarget, newName: string) => {
     const trimmed = newName.trim();
     if (!trimmed || trimmed === target.currentName) return;
@@ -304,9 +338,12 @@ export default function Documents() {
     targetFolderId: string | null
   ) => {
     try {
+      const targetProject = projects.find((p) => p.id === targetProjectId);
       await updateDoc(doc(db, 'documents', docId), {
         projectId: targetProjectId,
         folderId: targetFolderId,
+        visibility: 'project',
+        allowedEmails: targetProject?.allowedEmails || [],
       });
     } catch (err: any) {
       console.error('Error migrating document:', err);
@@ -326,29 +363,142 @@ export default function Documents() {
   };
   const handleDragEnd = () => {
     setDragging(null);
-    setDragOver(null);
+    setDropZone(null);
   };
-  const handleDragOver = (targetFolderId: string | 'root') => (e: React.DragEvent) => {
+
+  // Row-level drag over: computes before/into/after based on pointer Y.
+  const handleRowDragOver = (rowId: string, rowType: 'folder' | 'document') =>
+    (e: React.DragEvent<HTMLLIElement>) => {
+      if (!dragging) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = e.currentTarget.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const ratio = y / rect.height;
+      if (rowType === 'folder') {
+        // Top 25% = before, bottom 25% = after, middle = into.
+        if (ratio < 0.25) setDropZone({ kind: 'before', id: rowId, rowType });
+        else if (ratio > 0.75) setDropZone({ kind: 'after', id: rowId, rowType });
+        else setDropZone({ kind: 'into', id: rowId });
+      } else {
+        // Documents only support before/after.
+        if (ratio < 0.5) setDropZone({ kind: 'before', id: rowId, rowType });
+        else setDropZone({ kind: 'after', id: rowId, rowType });
+      }
+    };
+
+  // Drop handler for the home/breadcrumb (always "into a folder or root").
+  const handleIntoDragOver = (id: string | 'root') => (e: React.DragEvent) => {
     if (!dragging) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    setDragOver(targetFolderId);
+    setDropZone({ kind: 'into', id });
   };
-  const handleDrop = (targetFolderId: string | null) => async (e: React.DragEvent) => {
+
+  const handleIntoDrop = (folderId: string | null) => async (e: React.DragEvent) => {
     e.preventDefault();
     if (!dragging) return;
     const { type, id } = dragging;
     setDragging(null);
-    setDragOver(null);
+    setDropZone(null);
     if (type === 'document') {
       const current = documents.find((d) => d.id === id);
-      if (current && (current.folderId || null) === targetFolderId) return;
-      await moveDocument(id, targetFolderId);
+      if (current && (current.folderId || null) === folderId) return;
+      await moveDocument(id, folderId);
     } else if (type === 'folder') {
-      if (id === targetFolderId) return;
+      if (id === folderId) return;
       const current = folders.find((f) => f.id === id);
-      if (current && (current.parentFolderId || null) === targetFolderId) return;
-      await moveFolder(id, targetFolderId);
+      if (current && (current.parentFolderId || null) === folderId) return;
+      await moveFolder(id, folderId);
+    }
+  };
+
+  const handleRowDrop = (rowId: string, rowType: 'folder' | 'document') =>
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      const zone = dropZone;
+      if (!dragging || !zone) return;
+      const { type: dragType, id: dragId } = dragging;
+      setDragging(null);
+      setDropZone(null);
+
+      if (zone.kind === 'into' && rowType === 'folder') {
+        // Move into folder.
+        if (dragType === 'folder' && dragId === rowId) return;
+        if (dragType === 'folder' && isFolderDescendantOf(rowId, dragId)) {
+          alert('Cannot move a folder into itself or one of its subfolders.');
+          return;
+        }
+        if (dragType === 'document') await moveDocument(dragId, rowId);
+        else await moveFolder(dragId, rowId);
+        return;
+      }
+
+      // Reorder (before/after this row).
+      await reorderItem(dragging, { kind: zone.kind as 'before' | 'after', id: rowId, rowType });
+    };
+
+  // Reorder: compute a new `order` for the dragged item that slots it before/after target.
+  const reorderItem = async (
+    drag: DragItem,
+    zone: { kind: 'before' | 'after'; id: string; rowType: 'folder' | 'document' }
+  ) => {
+    // Use the full set of siblings (folders + docs share ordering within a container
+    // but we keep them separate because they render in two groups).
+    const siblings: Array<{ id: string; order?: number }> =
+      drag.type === 'folder'
+        ? folders
+            .filter((f) => (f.parentFolderId || null) === (currentFolderId || null))
+            .map((f) => ({ id: f.id, order: f.order }))
+        : documents
+            .filter((d) => (d.folderId || null) === (currentFolderId || null))
+            .map((d) => ({ id: d.id, order: d.order }));
+
+    // If dragging across types (folder vs document), just nudge against target's order.
+    if (
+      (drag.type === 'folder' && zone.rowType !== 'folder') ||
+      (drag.type === 'document' && zone.rowType !== 'document')
+    ) {
+      const targetItem =
+        zone.rowType === 'folder'
+          ? folders.find((f) => f.id === zone.id)
+          : documents.find((d) => d.id === zone.id);
+      if (!targetItem) return;
+      const base = targetItem.order ?? 1000;
+      const newOrder = zone.kind === 'before' ? base - 0.5 : base + 0.5;
+      if (drag.type === 'folder') {
+        await updateDoc(doc(db, 'folders', drag.id), { order: newOrder });
+      } else {
+        await updateDoc(doc(db, 'documents', drag.id), { order: newOrder });
+      }
+      return;
+    }
+
+    // Same-type reorder: compute midpoint between neighbors.
+    const sorted = siblings
+      .slice()
+      .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER));
+    const filtered = sorted.filter((s) => s.id !== drag.id);
+    const targetIdx = filtered.findIndex((s) => s.id === zone.id);
+    if (targetIdx === -1) return;
+    const insertIdx = zone.kind === 'before' ? targetIdx : targetIdx + 1;
+    const aboveOrder = filtered[insertIdx - 1]?.order;
+    const belowOrder = filtered[insertIdx]?.order;
+    let newOrder: number;
+    if (aboveOrder == null && belowOrder == null) newOrder = 1000;
+    else if (aboveOrder == null) newOrder = (belowOrder as number) - 1000;
+    else if (belowOrder == null) newOrder = aboveOrder + 1000;
+    else newOrder = (aboveOrder + belowOrder) / 2;
+
+    try {
+      if (drag.type === 'folder') {
+        await updateDoc(doc(db, 'folders', drag.id), { order: newOrder });
+      } else {
+        await updateDoc(doc(db, 'documents', drag.id), { order: newOrder });
+      }
+    } catch (err) {
+      console.error('Error reordering:', err);
+      alert('Failed to reorder.');
     }
   };
 
@@ -390,12 +540,17 @@ export default function Documents() {
     const trimmed = name.trim();
     if (!trimmed) return;
     try {
+      const siblingFolders = folders.filter(
+        (f) => (f.parentFolderId || null) === (currentFolderId || null)
+      );
+      const nextOrder = nextOrderValue(siblingFolders);
       await addDoc(collection(db, 'folders'), {
         name: trimmed,
         projectId: currentProjectId,
         parentFolderId: currentFolderId || null,
         createdAt: new Date().toISOString(),
         createdBy: profile.email,
+        order: nextOrder,
       });
       setCreatingFolder(false);
     } catch (err) {
@@ -403,6 +558,7 @@ export default function Documents() {
       alert('Failed to create folder.');
     }
   };
+
 
   // Ensure folder chain exists for a given relative path; returns the deepest folderId (or null for empty path).
   const ensureFolderPath = async (
@@ -443,12 +599,16 @@ export default function Documents() {
         parent = found.id;
         continue;
       }
+      const siblingFolders = folders.filter(
+        (f) => f.projectId === currentProjectId && (f.parentFolderId || null) === parent
+      );
       const created = await addDoc(collection(db, 'folders'), {
         name: segment,
         projectId: currentProjectId,
         parentFolderId: parent,
         createdAt: new Date().toISOString(),
         createdBy: profile.email,
+        order: nextOrderValue(siblingFolders),
       });
       cache.set(key, created.id);
       parent = created.id;
@@ -466,6 +626,12 @@ export default function Documents() {
     setUploadProgress({ done: 0, total: arr.length });
 
     const folderCache = new Map<string, string | null>();
+    const projectAllowedEmails = currentProject?.allowedEmails || [profile.email];
+
+    // Seed base order off the current folder's existing docs so uploads append to the end.
+    let orderCursor = nextOrderValue(
+      documents.filter((d) => (d.folderId || null) === (currentFolderId || null))
+    );
 
     try {
       for (const file of arr) {
@@ -497,7 +663,11 @@ export default function Documents() {
           allowDownload: false,
           projectId: currentProjectId,
           folderId,
+          visibility: 'project',
+          allowedEmails: projectAllowedEmails,
+          order: orderCursor,
         });
+        orderCursor += 1000;
 
         setUploadProgress((p) => (p ? { ...p, done: p.done + 1 } : null));
       }
@@ -897,11 +1067,15 @@ export default function Documents() {
         <div className="flex items-center gap-1.5 text-sm text-zinc-500 flex-wrap">
           <button
             onClick={() => goToFolder(null)}
-            onDragOver={isAdmin ? handleDragOver('root') : undefined}
-            onDragLeave={() => setDragOver((s) => (s === 'root' ? null : s))}
-            onDrop={isAdmin ? handleDrop(null) : undefined}
+            onDragOver={isAdmin ? handleIntoDragOver('root') : undefined}
+            onDragLeave={() =>
+              setDropZone((s) => (s && s.kind === 'into' && s.id === 'root' ? null : s))
+            }
+            onDrop={isAdmin ? handleIntoDrop(null) : undefined}
             className={`inline-flex items-center hover:text-zinc-900 font-medium text-zinc-700 rounded px-1 ${
-              dragOver === 'root' ? 'bg-indigo-100 ring-1 ring-indigo-400' : ''
+              dropZone?.kind === 'into' && dropZone.id === 'root'
+                ? 'bg-indigo-100 ring-1 ring-indigo-400'
+                : ''
             }`}
           >
             <Home className="w-3.5 h-3.5 mr-1" />
@@ -912,11 +1086,15 @@ export default function Documents() {
               <ChevronRight className="w-3.5 h-3.5 text-zinc-300" />
               <button
                 onClick={() => goToFolder(f.id)}
-                onDragOver={isAdmin ? handleDragOver(f.id) : undefined}
-                onDragLeave={() => setDragOver((s) => (s === f.id ? null : s))}
-                onDrop={isAdmin ? handleDrop(f.id) : undefined}
+                onDragOver={isAdmin ? handleIntoDragOver(f.id) : undefined}
+                onDragLeave={() =>
+                  setDropZone((s) => (s && s.kind === 'into' && s.id === f.id ? null : s))
+                }
+                onDrop={isAdmin ? handleIntoDrop(f.id) : undefined}
                 className={`hover:text-zinc-900 rounded px-1 ${
-                  dragOver === f.id ? 'bg-indigo-100 ring-1 ring-indigo-400' : ''
+                  dropZone?.kind === 'into' && dropZone.id === f.id
+                    ? 'bg-indigo-100 ring-1 ring-indigo-400'
+                    : ''
                 }`}
               >
                 {f.name}
@@ -1016,9 +1194,17 @@ export default function Documents() {
           <ul className="divide-y divide-zinc-200">
             {visibleFolders
               .slice()
-              .sort((a, b) => naturalCompare(a.name, b.name))
+              .sort((a, b) => {
+                const ao = a.order ?? Number.MAX_SAFE_INTEGER;
+                const bo = b.order ?? Number.MAX_SAFE_INTEGER;
+                if (ao !== bo) return ao - bo;
+                return naturalCompare(a.name, b.name);
+              })
               .map((f) => {
-                const isDropTarget = dragOver === f.id;
+                const zoneFor = dropZone && dropZone.id === f.id ? dropZone : null;
+                const isIntoTarget = zoneFor?.kind === 'into';
+                const showBefore = zoneFor?.kind === 'before';
+                const showAfter = zoneFor?.kind === 'after';
                 const isBeingDragged =
                   dragging?.type === 'folder' && dragging.id === f.id;
                 return (
@@ -1027,14 +1213,18 @@ export default function Documents() {
                     draggable={isAdmin}
                     onDragStart={isAdmin ? handleDragStart({ type: 'folder', id: f.id }) : undefined}
                     onDragEnd={handleDragEnd}
-                    onDragOver={isAdmin ? handleDragOver(f.id) : undefined}
-                    onDragLeave={() => setDragOver((s) => (s === f.id ? null : s))}
-                    onDrop={isAdmin ? handleDrop(f.id) : undefined}
-                    className={`transition-colors ${
-                      isDropTarget
+                    onDragOver={isAdmin ? handleRowDragOver(f.id, 'folder') : undefined}
+                    onDragLeave={() => setDropZone((s) => (s && s.id === f.id ? null : s))}
+                    onDrop={isAdmin ? handleRowDrop(f.id, 'folder') : undefined}
+                    className={`relative transition-colors ${
+                      isIntoTarget
                         ? 'bg-indigo-50 ring-2 ring-indigo-400 ring-inset'
                         : 'hover:bg-zinc-50'
-                    } ${isBeingDragged ? 'opacity-40' : ''}`}
+                    } ${isBeingDragged ? 'opacity-40' : ''} ${
+                      showBefore ? 'before:content-[""] before:absolute before:left-0 before:right-0 before:top-0 before:h-0.5 before:bg-indigo-500 before:z-10' : ''
+                    } ${
+                      showAfter ? 'after:content-[""] after:absolute after:left-0 after:right-0 after:bottom-0 after:h-0.5 after:bg-indigo-500 after:z-10' : ''
+                    }`}
                   >
                     <div className="px-6 py-4 flex items-center justify-between">
                       <div className="flex items-center min-w-0 gap-2 flex-1">
@@ -1086,18 +1276,34 @@ export default function Documents() {
               })}
             {visibleDocuments
               .slice()
-              .sort((a, b) => naturalCompare(a.title, b.title))
+              .sort((a, b) => {
+                const ao = a.order ?? Number.MAX_SAFE_INTEGER;
+                const bo = b.order ?? Number.MAX_SAFE_INTEGER;
+                if (ao !== bo) return ao - bo;
+                return naturalCompare(a.title, b.title);
+              })
               .map((d) => {
+                const zoneFor = dropZone && dropZone.id === d.id ? dropZone : null;
+                const showBefore = zoneFor?.kind === 'before';
+                const showAfter = zoneFor?.kind === 'after';
                 const isBeingDragged =
                   dragging?.type === 'document' && dragging.id === d.id;
+                const isRestricted = d.visibility === 'restricted';
                 return (
                 <li
                   key={d.id}
                   draggable={isAdmin}
                   onDragStart={isAdmin ? handleDragStart({ type: 'document', id: d.id }) : undefined}
                   onDragEnd={handleDragEnd}
-                  className={`transition-colors hover:bg-zinc-50 ${
+                  onDragOver={isAdmin ? handleRowDragOver(d.id, 'document') : undefined}
+                  onDragLeave={() => setDropZone((s) => (s && s.id === d.id ? null : s))}
+                  onDrop={isAdmin ? handleRowDrop(d.id, 'document') : undefined}
+                  className={`relative transition-colors hover:bg-zinc-50 ${
                     isBeingDragged ? 'opacity-40' : ''
+                  } ${
+                    showBefore ? 'before:content-[""] before:absolute before:left-0 before:right-0 before:top-0 before:h-0.5 before:bg-indigo-500 before:z-10' : ''
+                  } ${
+                    showAfter ? 'after:content-[""] after:absolute after:left-0 after:right-0 after:bottom-0 after:h-0.5 after:bg-indigo-500 after:z-10' : ''
                   }`}
                 >
                   <div className="px-6 py-4 flex items-center justify-between">
@@ -1109,7 +1315,14 @@ export default function Documents() {
                         <FileText className="w-5 h-5" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-zinc-900 truncate">{d.title}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-zinc-900 truncate">{d.title}</p>
+                          {isRestricted && (
+                            <span className="inline-flex items-center text-[10px] font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 flex-shrink-0">
+                              <EyeOff className="w-3 h-3 mr-0.5" /> Private
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-3 mt-1 text-xs text-zinc-500">
                           <span>{format(new Date(d.uploadedAt), 'MMM d, yyyy')}</span>
                           <span>&bull;</span>
@@ -1145,6 +1358,21 @@ export default function Documents() {
                             title="Rename document"
                           >
                             <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setVisibilityTarget(d)}
+                            className={`inline-flex items-center p-2 rounded-full ${
+                              isRestricted
+                                ? 'text-purple-700 bg-purple-50 hover:bg-purple-100'
+                                : 'text-zinc-700 bg-zinc-100 hover:bg-zinc-200'
+                            }`}
+                            title={
+                              isRestricted
+                                ? 'Private — only selected members can see this'
+                                : 'Shared with project (click to restrict)'
+                            }
+                          >
+                            {isRestricted ? <EyeOff className="w-4 h-4" /> : <Users className="w-4 h-4" />}
                           </button>
                           <button
                             onClick={() => toggleDownload(d.id, !!d.allowDownload)}
@@ -1211,6 +1439,18 @@ export default function Documents() {
           onSubmit={async (newName) => {
             await renameItem(renameTarget, newName);
             setRenameTarget(null);
+          }}
+        />
+      )}
+
+      {visibilityTarget && currentProject && (
+        <VisibilityModal
+          document={visibilityTarget}
+          projectAllowedEmails={currentProject.allowedEmails || []}
+          onClose={() => setVisibilityTarget(null)}
+          onSubmit={async (visibility, emails) => {
+            await updateVisibility(visibilityTarget.id, visibility, emails);
+            setVisibilityTarget(null);
           }}
         />
       )}
@@ -1592,6 +1832,137 @@ function RenameModal({
           <button
             type="submit"
             disabled={submitting || !name.trim()}
+            className="px-4 py-2 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg disabled:opacity-50"
+          >
+            {submitting ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function VisibilityModal({
+  document: documentItem,
+  projectAllowedEmails,
+  onClose,
+  onSubmit,
+}: {
+  document: DocumentItem;
+  projectAllowedEmails: string[];
+  onClose: () => void;
+  onSubmit: (visibility: 'project' | 'restricted', emails: string[]) => Promise<void>;
+}) {
+  const initialVisibility: 'project' | 'restricted' = documentItem.visibility || 'project';
+  const initialRestricted = new Set(
+    (documentItem.allowedEmails && documentItem.allowedEmails.length > 0
+      ? documentItem.allowedEmails
+      : projectAllowedEmails
+    ).filter((e) => projectAllowedEmails.includes(e))
+  );
+
+  const [visibility, setVisibility] = useState<'project' | 'restricted'>(initialVisibility);
+  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(initialRestricted);
+  const [submitting, setSubmitting] = useState(false);
+
+  const toggleEmail = (email: string) => {
+    setSelectedEmails((prev) => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email);
+      else next.add(email);
+      return next;
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    const finalEmails =
+      visibility === 'project'
+        ? projectAllowedEmails
+        : Array.from(selectedEmails);
+    await onSubmit(visibility, finalEmails);
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl"
+      >
+        <h3 className="text-lg font-semibold text-zinc-900 mb-1">Document visibility</h3>
+        <p className="text-sm text-zinc-500 mb-4 truncate">&quot;{documentItem.title}&quot;</p>
+
+        <div className="space-y-2">
+          <label className="flex items-start gap-3 p-3 rounded-lg border border-zinc-200 cursor-pointer hover:bg-zinc-50">
+            <input
+              type="radio"
+              name="visibility"
+              checked={visibility === 'project'}
+              onChange={() => setVisibility('project')}
+              className="mt-1"
+            />
+            <div>
+              <p className="text-sm font-medium text-zinc-900">All project members</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Anyone with access to this project can see this file.
+              </p>
+            </div>
+          </label>
+          <label className="flex items-start gap-3 p-3 rounded-lg border border-zinc-200 cursor-pointer hover:bg-zinc-50">
+            <input
+              type="radio"
+              name="visibility"
+              checked={visibility === 'restricted'}
+              onChange={() => setVisibility('restricted')}
+              className="mt-1"
+            />
+            <div>
+              <p className="text-sm font-medium text-zinc-900">Restricted</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Only the project members you pick can see this file.
+              </p>
+            </div>
+          </label>
+        </div>
+
+        {visibility === 'restricted' && (
+          <div className="mt-4 border border-zinc-200 rounded-lg p-3 max-h-64 overflow-y-auto">
+            {projectAllowedEmails.length === 0 ? (
+              <p className="text-xs text-zinc-500">
+                No one has project access yet. Grant project access in Access Control first.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {projectAllowedEmails.map((email) => (
+                  <li key={email}>
+                    <label className="flex items-center gap-2 text-sm text-zinc-800 py-1 cursor-pointer hover:bg-zinc-50 rounded px-1">
+                      <input
+                        type="checkbox"
+                        checked={selectedEmails.has(email)}
+                        onChange={() => toggleEmail(email)}
+                      />
+                      <span className="truncate">{email}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
             className="px-4 py-2 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg disabled:opacity-50"
           >
             {submitting ? 'Saving...' : 'Save'}

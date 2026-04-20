@@ -12,6 +12,8 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
+  getDocs,
+  where,
 } from 'firebase/firestore';
 import {
   UserPlus,
@@ -118,6 +120,31 @@ export default function AccessControl() {
     }
   };
 
+  const cascadeToNonRestrictedDocs = async (
+    projectId: string,
+    op: 'add' | 'remove',
+    email: string
+  ) => {
+    try {
+      const snap = await getDocs(
+        query(collection(db, 'documents'), where('projectId', '==', projectId))
+      );
+      const writes: Promise<void>[] = [];
+      snap.docs.forEach((d) => {
+        const data = d.data() as any;
+        if (data.visibility === 'restricted') return; // private docs keep their own list
+        writes.push(
+          updateDoc(d.ref, {
+            allowedEmails: op === 'add' ? arrayUnion(email) : arrayRemove(email),
+          }) as unknown as Promise<void>
+        );
+      });
+      await Promise.all(writes);
+    } catch (err) {
+      console.error('Error cascading project access to docs:', err);
+    }
+  };
+
   const addEmailToProject = async (projectId: string, email: string) => {
     const emailLower = email.toLowerCase().trim();
     if (!emailLower) return;
@@ -125,6 +152,7 @@ export default function AccessControl() {
       await updateDoc(doc(db, 'projects', projectId), {
         allowedEmails: arrayUnion(emailLower),
       });
+      await cascadeToNonRestrictedDocs(projectId, 'add', emailLower);
     } catch (err) {
       console.error('Error adding email to project:', err);
       alert('Failed to grant project access.');
@@ -136,8 +164,35 @@ export default function AccessControl() {
       await updateDoc(doc(db, 'projects', projectId), {
         allowedEmails: arrayRemove(email),
       });
+      await cascadeToNonRestrictedDocs(projectId, 'remove', email);
     } catch (err) {
       console.error('Error removing email from project:', err);
+    }
+  };
+
+  // Backfill: align every document in this project with the current member list.
+  // Non-restricted docs get `allowedEmails` replaced with the project's list.
+  const syncProjectDocs = async (project: Project) => {
+    try {
+      const snap = await getDocs(
+        query(collection(db, 'documents'), where('projectId', '==', project.id))
+      );
+      const writes: Promise<void>[] = [];
+      snap.docs.forEach((d) => {
+        const data = d.data() as any;
+        if (data.visibility === 'restricted') return;
+        writes.push(
+          updateDoc(d.ref, {
+            visibility: 'project',
+            allowedEmails: project.allowedEmails || [],
+          }) as unknown as Promise<void>
+        );
+      });
+      await Promise.all(writes);
+      alert(`Synced ${writes.length} document${writes.length === 1 ? '' : 's'}.`);
+    } catch (err: any) {
+      console.error('Error syncing project docs:', err);
+      alert('Failed to sync: ' + (err?.message || 'unknown error'));
     }
   };
 
@@ -274,6 +329,7 @@ export default function AccessControl() {
                   }
                   onAddEmail={(email) => addEmailToProject(p.id, email)}
                   onRemoveEmail={(email) => removeEmailFromProject(p.id, email)}
+                  onSyncDocs={() => syncProjectDocs(p)}
                   authorizedEmails={emails.map((e) => e.email)}
                 />
               ))}
@@ -321,6 +377,7 @@ function ProjectAccessRow({
   onToggle,
   onAddEmail,
   onRemoveEmail,
+  onSyncDocs,
   authorizedEmails,
 }: {
   project: Project;
@@ -328,10 +385,12 @@ function ProjectAccessRow({
   onToggle: () => void;
   onAddEmail: (email: string) => Promise<void>;
   onRemoveEmail: (email: string) => Promise<void>;
+  onSyncDocs: () => Promise<void>;
   authorizedEmails: string[];
 }) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const members = project.allowedEmails || [];
 
@@ -437,6 +496,24 @@ function ProjectAccessRow({
               })}
             </ul>
           )}
+
+          <div className="mt-4 pt-3 border-t border-zinc-200 flex items-center justify-between">
+            <p className="text-xs text-zinc-500">
+              Private documents keep their own allowlists and aren&apos;t touched by sync.
+            </p>
+            <button
+              onClick={async () => {
+                setSyncing(true);
+                await onSyncDocs();
+                setSyncing(false);
+              }}
+              disabled={syncing}
+              className="text-xs font-medium text-indigo-700 hover:text-indigo-900 disabled:opacity-50"
+              title="Replace allowedEmails on every non-private document in this project with the current member list"
+            >
+              {syncing ? 'Syncing...' : 'Sync document access'}
+            </button>
+          </div>
         </div>
       )}
     </li>
