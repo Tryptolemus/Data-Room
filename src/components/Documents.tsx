@@ -185,7 +185,15 @@ export default function Documents() {
     setProjectLoading(true);
 
     const foldersQ = query(collection(db, 'folders'), where('projectId', '==', currentProjectId));
-    const docsQ = query(collection(db, 'documents'), where('projectId', '==', currentProjectId));
+    // Viewers' LIST query must include the allowedEmails filter so it matches the
+    // document read rule; otherwise Firestore denies the entire list.
+    const docsQ: Query<DocumentData> = isGlobalAdmin
+      ? query(collection(db, 'documents'), where('projectId', '==', currentProjectId))
+      : query(
+          collection(db, 'documents'),
+          where('projectId', '==', currentProjectId),
+          where('allowedEmails', 'array-contains', profile!.email)
+        );
 
     let foldersReady = false;
     let docsReady = false;
@@ -225,7 +233,7 @@ export default function Documents() {
       unsubF();
       unsubD();
     };
-  }, [currentProjectId]);
+  }, [currentProjectId, isGlobalAdmin, profile?.email]);
 
   // Legacy uncategorized docs (admin only).
   const [legacyDocs, setLegacyDocs] = useState<DocumentItem[]>([]);
