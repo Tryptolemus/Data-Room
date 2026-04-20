@@ -24,6 +24,8 @@ export default function DocumentViewer() {
   
   const viewStartTime = useRef<number>(Date.now());
 
+  const viewingProjectIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     const fetchDocument = async () => {
       if (!id) return;
@@ -31,17 +33,21 @@ export default function DocumentViewer() {
         const docRef = doc(db, 'documents', id);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
-          setDocumentData({ id: docSnap.id, ...docSnap.data() });
-          
+          const data = docSnap.data() as any;
+          setDocumentData({ id: docSnap.id, ...data });
+          viewingProjectIdRef.current = typeof data?.projectId === 'string' ? data.projectId : null;
+
           // Log view event
           if (profile) {
             try {
-              await addDoc(collection(db, 'analytics'), {
+              const entry: any = {
                 documentId: id,
                 userId: profile.email,
                 action: 'view',
-                timestamp: new Date().toISOString()
-              });
+                timestamp: new Date().toISOString(),
+              };
+              if (viewingProjectIdRef.current) entry.projectId = viewingProjectIdRef.current;
+              await addDoc(collection(db, 'analytics'), entry);
             } catch (analyticsError) {
               console.error('Failed to log analytics view:', analyticsError);
             }
@@ -64,13 +70,15 @@ export default function DocumentViewer() {
       if (profile && id) {
         const duration = Math.floor((Date.now() - viewStartTime.current) / 1000);
         if (duration > 0) {
-          addDoc(collection(db, 'analytics'), {
+          const entry: any = {
             documentId: id,
             userId: profile.email,
             action: 'view',
             durationSeconds: duration,
-            timestamp: new Date().toISOString()
-          }).catch(console.error);
+            timestamp: new Date().toISOString(),
+          };
+          if (viewingProjectIdRef.current) entry.projectId = viewingProjectIdRef.current;
+          addDoc(collection(db, 'analytics'), entry).catch(console.error);
         }
       }
     };

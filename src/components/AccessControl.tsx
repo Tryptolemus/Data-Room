@@ -35,6 +35,17 @@ interface Project {
   createdAt: string;
   createdBy: string;
   allowedEmails: string[];
+  editorEmails?: string[];
+  adminEmails?: string[];
+}
+
+type ProjectRole = 'viewer' | 'editor' | 'admin';
+
+function projectRoleFor(project: Project, email: string): ProjectRole | null {
+  if ((project.adminEmails || []).includes(email)) return 'admin';
+  if ((project.editorEmails || []).includes(email)) return 'editor';
+  if ((project.allowedEmails || []).includes(email)) return 'viewer';
+  return null;
 }
 
 export default function AccessControl() {
@@ -145,17 +156,24 @@ export default function AccessControl() {
     }
   };
 
-  const addEmailToProject = async (projectId: string, email: string) => {
+  const setProjectRole = async (
+    projectId: string,
+    email: string,
+    role: ProjectRole
+  ) => {
     const emailLower = email.toLowerCase().trim();
     if (!emailLower) return;
     try {
-      await updateDoc(doc(db, 'projects', projectId), {
+      const update: any = {
         allowedEmails: arrayUnion(emailLower),
-      });
+        editorEmails: role === 'editor' ? arrayUnion(emailLower) : arrayRemove(emailLower),
+        adminEmails: role === 'admin' ? arrayUnion(emailLower) : arrayRemove(emailLower),
+      };
+      await updateDoc(doc(db, 'projects', projectId), update);
       await cascadeToNonRestrictedDocs(projectId, 'add', emailLower);
-    } catch (err) {
-      console.error('Error adding email to project:', err);
-      alert('Failed to grant project access.');
+    } catch (err: any) {
+      console.error('Error setting project role:', err);
+      alert('Failed to set role: ' + (err?.message || 'unknown error'));
     }
   };
 
@@ -163,6 +181,8 @@ export default function AccessControl() {
     try {
       await updateDoc(doc(db, 'projects', projectId), {
         allowedEmails: arrayRemove(email),
+        editorEmails: arrayRemove(email),
+        adminEmails: arrayRemove(email),
       });
       await cascadeToNonRestrictedDocs(projectId, 'remove', email);
     } catch (err) {
@@ -327,7 +347,7 @@ export default function AccessControl() {
                   onToggle={() =>
                     setExpandedProjectId((cur) => (cur === p.id ? null : p.id))
                   }
-                  onAddEmail={(email) => addEmailToProject(p.id, email)}
+                  onSetRole={(email, role) => setProjectRole(p.id, email, role)}
                   onRemoveEmail={(email) => removeEmailFromProject(p.id, email)}
                   onSyncDocs={() => syncProjectDocs(p)}
                   authorizedEmails={emails.map((e) => e.email)}
@@ -375,7 +395,7 @@ function ProjectAccessRow({
   project,
   expanded,
   onToggle,
-  onAddEmail,
+  onSetRole,
   onRemoveEmail,
   onSyncDocs,
   authorizedEmails,
@@ -383,12 +403,13 @@ function ProjectAccessRow({
   project: Project;
   expanded: boolean;
   onToggle: () => void;
-  onAddEmail: (email: string) => Promise<void>;
+  onSetRole: (email: string, role: ProjectRole) => Promise<void>;
   onRemoveEmail: (email: string) => Promise<void>;
   onSyncDocs: () => Promise<void>;
   authorizedEmails: string[];
 }) {
   const [input, setInput] = useState('');
+  const [inputRole, setInputRole] = useState<ProjectRole>('viewer');
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -399,9 +420,10 @@ function ProjectAccessRow({
     const email = input.toLowerCase().trim();
     if (!email) return;
     setBusy(true);
-    await onAddEmail(email);
+    await onSetRole(email, inputRole);
     setBusy(false);
     setInput('');
+    setInputRole('viewer');
   };
 
   return (
@@ -446,6 +468,16 @@ function ProjectAccessRow({
                   <option key={e} value={e} />
                 ))}
             </datalist>
+            <select
+              value={inputRole}
+              onChange={(e) => setInputRole(e.target.value as ProjectRole)}
+              className="rounded-lg border-zinc-300 focus:ring-zinc-500 focus:border-zinc-500 text-sm px-3 py-2 border"
+              title="Role"
+            >
+              <option value="viewer">Viewer</option>
+              <option value="editor">Editor</option>
+              <option value="admin">Admin</option>
+            </select>
             <button
               type="submit"
               disabled={busy || !input.trim()}
@@ -463,12 +495,13 @@ function ProjectAccessRow({
             <ul className="mt-4 space-y-1">
               {members.map((email) => {
                 const authorized = authorizedEmails.includes(email);
+                const role = projectRoleFor(project, email) || 'viewer';
                 return (
                   <li
                     key={email}
-                    className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-zinc-200"
+                    className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-zinc-200 gap-2"
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
                       <Shield
                         className={`w-4 h-4 flex-shrink-0 ${
                           authorized ? 'text-emerald-600' : 'text-amber-500'
@@ -484,6 +517,16 @@ function ProjectAccessRow({
                         </span>
                       )}
                     </div>
+                    <select
+                      value={role}
+                      onChange={(e) => onSetRole(email, e.target.value as ProjectRole)}
+                      className="text-xs rounded border-zinc-300 px-2 py-1 border bg-white"
+                      title="Role"
+                    >
+                      <option value="viewer">Viewer</option>
+                      <option value="editor">Editor</option>
+                      <option value="admin">Admin</option>
+                    </select>
                     <button
                       onClick={() => onRemoveEmail(email)}
                       className="p-1.5 rounded-full text-red-600 hover:bg-red-50"

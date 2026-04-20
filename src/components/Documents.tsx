@@ -61,6 +61,19 @@ interface Project {
   createdAt: string;
   createdBy: string;
   allowedEmails: string[];
+  editorEmails?: string[];
+  adminEmails?: string[];
+}
+
+function projectRoleFor(
+  project: Project | undefined,
+  email: string | undefined
+): 'admin' | 'editor' | 'viewer' | null {
+  if (!project || !email) return null;
+  if ((project.adminEmails || []).includes(email)) return 'admin';
+  if ((project.editorEmails || []).includes(email)) return 'editor';
+  if ((project.allowedEmails || []).includes(email)) return 'viewer';
+  return null;
 }
 
 interface FolderItem {
@@ -92,7 +105,7 @@ interface DocumentItem {
 
 export default function Documents() {
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const isGlobalAdmin = profile?.role === 'admin';
 
   const [searchParams, setSearchParams] = useSearchParams();
   const currentProjectId = searchParams.get('project');
@@ -133,7 +146,7 @@ export default function Documents() {
   useEffect(() => {
     if (!profile) return;
 
-    const q: Query<DocumentData> = isAdmin
+    const q: Query<DocumentData> = isGlobalAdmin
       ? query(collection(db, 'projects'), orderBy('createdAt', 'desc'))
       : query(
           collection(db, 'projects'),
@@ -160,7 +173,7 @@ export default function Documents() {
       }
     );
     return () => unsubscribe();
-  }, [profile, isAdmin]);
+  }, [profile, isGlobalAdmin]);
 
   // Load folders & documents for the current project.
   useEffect(() => {
@@ -217,7 +230,7 @@ export default function Documents() {
   // Legacy uncategorized docs (admin only).
   const [legacyDocs, setLegacyDocs] = useState<DocumentItem[]>([]);
   useEffect(() => {
-    if (!isAdmin || !showUncategorized) return;
+    if (!isGlobalAdmin || !showUncategorized) return;
     const q = query(collection(db, 'documents'), orderBy('uploadedAt', 'desc'));
     const unsubscribe = onSnapshot(
       q,
@@ -228,12 +241,23 @@ export default function Documents() {
       (err) => console.error('Error fetching legacy docs:', err)
     );
     return () => unsubscribe();
-  }, [isAdmin, showUncategorized]);
+  }, [isGlobalAdmin, showUncategorized]);
 
   const currentProject = useMemo(
     () => projects.find((p) => p.id === currentProjectId) || null,
     [projects, currentProjectId]
   );
+
+  const currentProjectRole = useMemo(
+    () => projectRoleFor(currentProject || undefined, profile?.email),
+    [currentProject, profile?.email]
+  );
+  const canEditCurrentProject =
+    isGlobalAdmin || currentProjectRole === 'editor' || currentProjectRole === 'admin';
+  const canAdminCurrentProject = isGlobalAdmin || currentProjectRole === 'admin';
+
+  const canAdminProject = (p: Project) =>
+    isGlobalAdmin || (profile?.email ? (p.adminEmails || []).includes(profile.email) : false);
 
   const visibleFolders = useMemo(
     () => folders.filter((f) => (f.parentFolderId || null) === (currentFolderId || null)),
@@ -522,6 +546,8 @@ export default function Documents() {
         createdAt: new Date().toISOString(),
         createdBy: profile.email,
         allowedEmails: [profile.email],
+        editorEmails: [],
+        adminEmails: [profile.email],
       });
       setCreatingProject(false);
       goToProject(ref.id);
@@ -811,12 +837,12 @@ export default function Documents() {
           <div>
             <h1 className="text-2xl font-bold text-zinc-900">Projects</h1>
             <p className="text-sm text-zinc-500 mt-1">
-              {isAdmin
+              {isGlobalAdmin
                 ? 'Organize documents into projects and grant access per project.'
                 : 'Projects shared with you.'}
             </p>
           </div>
-          {isAdmin && (
+          {isGlobalAdmin && (
             <button
               onClick={() => setCreatingProject(true)}
               className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg shadow-sm text-white bg-zinc-900 hover:bg-zinc-800 transition-colors"
@@ -845,7 +871,7 @@ export default function Documents() {
             <FolderOpen className="mx-auto h-12 w-12 text-zinc-300" />
             <h3 className="mt-2 text-sm font-medium text-zinc-900">No projects yet</h3>
             <p className="mt-1 text-sm text-zinc-500">
-              {isAdmin
+              {isGlobalAdmin
                 ? 'Create your first project to start organizing documents.'
                 : 'No projects have been shared with you yet.'}
             </p>
@@ -872,14 +898,21 @@ export default function Documents() {
                       )}
                       <p className="text-xs text-zinc-400 mt-2">
                         Created {format(new Date(p.createdAt), 'MMM d, yyyy')}
-                        {isAdmin && p.allowedEmails && (
+                        {p.allowedEmails && (
                           <> &bull; {p.allowedEmails.length} member{p.allowedEmails.length === 1 ? '' : 's'}</>
                         )}
+                        {(() => {
+                          const role = projectRoleFor(p, profile?.email);
+                          if (!role || isGlobalAdmin) return null;
+                          return (
+                            <> &bull; <span className="capitalize">{role}</span></>
+                          );
+                        })()}
                       </p>
                     </div>
                   </div>
                 </button>
-                {isAdmin && (
+                {canAdminProject(p) && (
                   <div className="mt-4 pt-3 border-t border-zinc-100 flex justify-between">
                     <button
                       onClick={() =>
@@ -904,7 +937,7 @@ export default function Documents() {
           </div>
         )}
 
-        {isAdmin && (
+        {isGlobalAdmin && (
           <div className="pt-4 border-t border-zinc-200">
             <button
               onClick={() => setShowUncategorized((s) => !s)}
@@ -1067,11 +1100,11 @@ export default function Documents() {
         <div className="flex items-center gap-1.5 text-sm text-zinc-500 flex-wrap">
           <button
             onClick={() => goToFolder(null)}
-            onDragOver={isAdmin ? handleIntoDragOver('root') : undefined}
+            onDragOver={canEditCurrentProject ? handleIntoDragOver('root') : undefined}
             onDragLeave={() =>
               setDropZone((s) => (s && s.kind === 'into' && s.id === 'root' ? null : s))
             }
-            onDrop={isAdmin ? handleIntoDrop(null) : undefined}
+            onDrop={canEditCurrentProject ? handleIntoDrop(null) : undefined}
             className={`inline-flex items-center hover:text-zinc-900 font-medium text-zinc-700 rounded px-1 ${
               dropZone?.kind === 'into' && dropZone.id === 'root'
                 ? 'bg-indigo-100 ring-1 ring-indigo-400'
@@ -1086,11 +1119,11 @@ export default function Documents() {
               <ChevronRight className="w-3.5 h-3.5 text-zinc-300" />
               <button
                 onClick={() => goToFolder(f.id)}
-                onDragOver={isAdmin ? handleIntoDragOver(f.id) : undefined}
+                onDragOver={canEditCurrentProject ? handleIntoDragOver(f.id) : undefined}
                 onDragLeave={() =>
                   setDropZone((s) => (s && s.kind === 'into' && s.id === f.id ? null : s))
                 }
-                onDrop={isAdmin ? handleIntoDrop(f.id) : undefined}
+                onDrop={canEditCurrentProject ? handleIntoDrop(f.id) : undefined}
                 className={`hover:text-zinc-900 rounded px-1 ${
                   dropZone?.kind === 'into' && dropZone.id === f.id
                     ? 'bg-indigo-100 ring-1 ring-indigo-400'
@@ -1112,7 +1145,7 @@ export default function Documents() {
               <p className="text-sm text-zinc-500 mt-1">{currentProject.description}</p>
             )}
           </div>
-          {isAdmin && (
+          {canEditCurrentProject && (
             <div className="flex gap-2 flex-wrap justify-end">
               <button
                 onClick={() => setCreatingFolder(true)}
@@ -1186,7 +1219,7 @@ export default function Documents() {
           <FileIcon className="mx-auto h-12 w-12 text-zinc-300" />
           <h3 className="mt-2 text-sm font-medium text-zinc-900">Empty folder</h3>
           <p className="mt-1 text-sm text-zinc-500">
-            {isAdmin ? 'Create a folder or upload documents to get started.' : 'Nothing here yet.'}
+            {canEditCurrentProject ? 'Create a folder or upload documents to get started.' : 'Nothing here yet.'}
           </p>
         </div>
       ) : (
@@ -1210,12 +1243,12 @@ export default function Documents() {
                 return (
                   <li
                     key={f.id}
-                    draggable={isAdmin}
-                    onDragStart={isAdmin ? handleDragStart({ type: 'folder', id: f.id }) : undefined}
+                    draggable={canEditCurrentProject}
+                    onDragStart={canEditCurrentProject ? handleDragStart({ type: 'folder', id: f.id }) : undefined}
                     onDragEnd={handleDragEnd}
-                    onDragOver={isAdmin ? handleRowDragOver(f.id, 'folder') : undefined}
+                    onDragOver={canEditCurrentProject ? handleRowDragOver(f.id, 'folder') : undefined}
                     onDragLeave={() => setDropZone((s) => (s && s.id === f.id ? null : s))}
-                    onDrop={isAdmin ? handleRowDrop(f.id, 'folder') : undefined}
+                    onDrop={canEditCurrentProject ? handleRowDrop(f.id, 'folder') : undefined}
                     className={`relative transition-colors ${
                       isIntoTarget
                         ? 'bg-indigo-50 ring-2 ring-indigo-400 ring-inset'
@@ -1228,7 +1261,7 @@ export default function Documents() {
                   >
                     <div className="px-6 py-4 flex items-center justify-between">
                       <div className="flex items-center min-w-0 gap-2 flex-1">
-                        {isAdmin && (
+                        {canEditCurrentProject && (
                           <GripVertical className="w-4 h-4 text-zinc-300 flex-shrink-0 cursor-grab" />
                         )}
                         <button
@@ -1246,7 +1279,7 @@ export default function Documents() {
                           </div>
                         </button>
                       </div>
-                      {isAdmin && (
+                      {canEditCurrentProject && (
                         <div className="flex items-center gap-2 ml-4 flex-shrink-0">
                           <button
                             onClick={() =>
@@ -1292,12 +1325,12 @@ export default function Documents() {
                 return (
                 <li
                   key={d.id}
-                  draggable={isAdmin}
-                  onDragStart={isAdmin ? handleDragStart({ type: 'document', id: d.id }) : undefined}
+                  draggable={canEditCurrentProject}
+                  onDragStart={canEditCurrentProject ? handleDragStart({ type: 'document', id: d.id }) : undefined}
                   onDragEnd={handleDragEnd}
-                  onDragOver={isAdmin ? handleRowDragOver(d.id, 'document') : undefined}
+                  onDragOver={canEditCurrentProject ? handleRowDragOver(d.id, 'document') : undefined}
                   onDragLeave={() => setDropZone((s) => (s && s.id === d.id ? null : s))}
-                  onDrop={isAdmin ? handleRowDrop(d.id, 'document') : undefined}
+                  onDrop={canEditCurrentProject ? handleRowDrop(d.id, 'document') : undefined}
                   className={`relative transition-colors hover:bg-zinc-50 ${
                     isBeingDragged ? 'opacity-40' : ''
                   } ${
@@ -1308,7 +1341,7 @@ export default function Documents() {
                 >
                   <div className="px-6 py-4 flex items-center justify-between">
                     <div className="flex items-center min-w-0 gap-2 flex-1">
-                      {isAdmin && (
+                      {canEditCurrentProject && (
                         <GripVertical className="w-4 h-4 text-zinc-300 flex-shrink-0 cursor-grab" />
                       )}
                       <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 flex-shrink-0">
@@ -1327,7 +1360,7 @@ export default function Documents() {
                           <span>{format(new Date(d.uploadedAt), 'MMM d, yyyy')}</span>
                           <span>&bull;</span>
                           <span>{formatBytes(d.size || 0)}</span>
-                          {isAdmin && (
+                          {canEditCurrentProject && (
                             <>
                               <span>&bull;</span>
                               <span className="truncate">By {d.uploadedBy}</span>
@@ -1344,7 +1377,7 @@ export default function Documents() {
                       >
                         <Eye className="w-4 h-4" />
                       </Link>
-                      {isAdmin && (
+                      {canEditCurrentProject && (
                         <>
                           <button
                             onClick={() =>
@@ -1359,21 +1392,23 @@ export default function Documents() {
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => setVisibilityTarget(d)}
-                            className={`inline-flex items-center p-2 rounded-full ${
-                              isRestricted
-                                ? 'text-purple-700 bg-purple-50 hover:bg-purple-100'
-                                : 'text-zinc-700 bg-zinc-100 hover:bg-zinc-200'
-                            }`}
-                            title={
-                              isRestricted
-                                ? 'Private — only selected members can see this'
-                                : 'Shared with project (click to restrict)'
-                            }
-                          >
-                            {isRestricted ? <EyeOff className="w-4 h-4" /> : <Users className="w-4 h-4" />}
-                          </button>
+                          {canAdminCurrentProject && (
+                            <button
+                              onClick={() => setVisibilityTarget(d)}
+                              className={`inline-flex items-center p-2 rounded-full ${
+                                isRestricted
+                                  ? 'text-purple-700 bg-purple-50 hover:bg-purple-100'
+                                  : 'text-zinc-700 bg-zinc-100 hover:bg-zinc-200'
+                              }`}
+                              title={
+                                isRestricted
+                                  ? 'Private — only selected members can see this'
+                                  : 'Shared with project (click to restrict)'
+                              }
+                            >
+                              {isRestricted ? <EyeOff className="w-4 h-4" /> : <Users className="w-4 h-4" />}
+                            </button>
+                          )}
                           <button
                             onClick={() => toggleDownload(d.id, !!d.allowDownload)}
                             className={`inline-flex items-center p-2 rounded-full ${

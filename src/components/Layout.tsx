@@ -17,6 +17,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { name: 'Messages', href: '/messages', icon: MessageSquare },
   ] : [
     { name: 'Documents', href: '/', icon: FileText },
+    { name: 'Analytics', href: '/analytics', icon: Activity },
     { name: 'Messages', href: '/messages', icon: MessageSquare },
   ];
 

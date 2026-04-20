@@ -77,7 +77,7 @@ function AppRoutes() {
       <Route
         path="/analytics"
         element={
-          <PrivateRoute requireAdmin>
+          <PrivateRoute>
             <Layout>
               <Analytics />
             </Layout>

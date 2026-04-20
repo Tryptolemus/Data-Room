@@ -36,6 +36,26 @@ service cloud.firestore {
         request.auth.token.email in projectData(projectId).allowedEmails
       );
     }
+    function isProjectAdmin(projectId) {
+      return isAdmin() || (
+        isAuthenticated() &&
+        exists(/databases/$(database)/documents/projects/$(projectId)) &&
+        'adminEmails' in projectData(projectId) &&
+        request.auth.token.email in projectData(projectId).adminEmails
+      );
+    }
+    function isProjectEditor(projectId) {
+      return isAdmin() || (
+        isAuthenticated() &&
+        exists(/databases/$(database)/documents/projects/$(projectId)) &&
+        (
+          ('adminEmails' in projectData(projectId) &&
+            request.auth.token.email in projectData(projectId).adminEmails) ||
+          ('editorEmails' in projectData(projectId) &&
+            request.auth.token.email in projectData(projectId).editorEmails)
+        )
+      );
+    }
 
     // Domain Validators
     function isValidUser() {
@@ -54,12 +74,14 @@ service cloud.firestore {
     }
 
     function isValidProject() {
-      return hasOnlyAllowedFields(['name', 'description', 'createdAt', 'createdBy', 'allowedEmails']) &&
+      return hasOnlyAllowedFields(['name', 'description', 'createdAt', 'createdBy', 'allowedEmails', 'editorEmails', 'adminEmails']) &&
              request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() < 200 &&
              (!('description' in request.resource.data) || (request.resource.data.description is string && request.resource.data.description.size() < 1000)) &&
              request.resource.data.createdAt is string && request.resource.data.createdAt.size() < 50 &&
              request.resource.data.createdBy is string && request.resource.data.createdBy.size() < 100 &&
-             request.resource.data.allowedEmails is list;
+             request.resource.data.allowedEmails is list &&
+             (!('editorEmails' in request.resource.data) || request.resource.data.editorEmails is list) &&
+             (!('adminEmails' in request.resource.data) || request.resource.data.adminEmails is list);
     }
 
     function isValidFolder() {
@@ -90,12 +112,13 @@ service cloud.firestore {
     }
 
     function isValidAnalytics() {
-      return hasOnlyAllowedFields(['documentId', 'userId', 'action', 'durationSeconds', 'timestamp']) &&
+      return hasOnlyAllowedFields(['documentId', 'userId', 'action', 'durationSeconds', 'timestamp', 'projectId']) &&
              request.resource.data.documentId is string && request.resource.data.documentId.size() < 100 &&
              request.resource.data.userId is string && request.resource.data.userId.size() < 100 &&
              request.resource.data.action in ['view', 'download'] &&
              (!('durationSeconds' in request.resource.data) || request.resource.data.durationSeconds is number) &&
-             request.resource.data.timestamp is string && request.resource.data.timestamp.size() < 50;
+             request.resource.data.timestamp is string && request.resource.data.timestamp.size() < 50 &&
+             (!('projectId' in request.resource.data) || (request.resource.data.projectId is string && request.resource.data.projectId.size() < 100));
     }
 
     function isValidMessage() {
@@ -123,16 +146,18 @@ service cloud.firestore {
 
     match /projects/{projectId} {
       allow read: if isAdmin() || (isAuthenticated() && request.auth.token.email in resource.data.allowedEmails);
-      allow create, update: if isAdmin() && isValidProject();
-      allow delete: if isAdmin();
+      allow create: if isAdmin() && isValidProject();
+      allow update: if isValidProject() && isProjectAdmin(projectId);
+      allow delete: if isProjectAdmin(projectId);
     }
 
     match /folders/{folderId} {
       allow read: if isAdmin() || hasProjectAccess(resource.data.projectId);
-      allow create: if isAdmin() && isValidFolder();
-      allow update: if isAdmin() && isValidFolder() &&
-                    request.resource.data.projectId == resource.data.projectId;
-      allow delete: if isAdmin();
+      allow create: if isValidFolder() && isProjectEditor(request.resource.data.projectId);
+      allow update: if isValidFolder() &&
+                    request.resource.data.projectId == resource.data.projectId &&
+                    isProjectEditor(resource.data.projectId);
+      allow delete: if isAdmin() || isProjectEditor(resource.data.projectId);
     }
 
     match /documents/{documentId} {
@@ -140,12 +165,20 @@ service cloud.firestore {
         'allowedEmails' in resource.data &&
         request.auth.token.email in resource.data.allowedEmails
       );
-      allow create, update: if isAdmin() && isValidDocument();
-      allow delete: if isAdmin();
+      allow create: if isValidDocument() &&
+                    'projectId' in request.resource.data &&
+                    isProjectEditor(request.resource.data.projectId);
+      allow update: if isValidDocument() &&
+                    // Moving a document across projects requires global admin.
+                    (isAdmin() || request.resource.data.projectId == resource.data.projectId) &&
+                    isProjectEditor(resource.data.projectId);
+      allow delete: if isAdmin() || isProjectEditor(resource.data.projectId);
     }
 
     match /analytics/{analyticsId} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || (
+        'projectId' in resource.data && hasProjectAccess(resource.data.projectId)
+      );
       allow create: if isAuthenticated() && isEmailOwner(request.resource.data.userId) && isValidAnalytics();
       allow update: if isAuthenticated() && isEmailOwner(request.resource.data.userId) && isValidAnalytics() &&
                     request.resource.data.documentId == resource.data.documentId &&
