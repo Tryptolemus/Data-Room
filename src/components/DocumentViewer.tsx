@@ -21,10 +21,27 @@ export default function DocumentViewer() {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [isFocused, setIsFocused] = useState(true);
   const [pdfError, setPdfError] = useState<Error | null>(null);
-  
+  const [pageWidth, setPageWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return 800;
+    // Fit within the viewport minus small horizontal padding, capped at 800px.
+    return Math.min(800, Math.max(280, window.innerWidth - 24));
+  });
+
   const viewStartTime = useRef<number>(Date.now());
 
   const viewingProjectIdRef = useRef<string | null>(null);
+
+  // Keep PDF page width in sync with viewport width so mobile fits.
+  useEffect(() => {
+    const onResize = () => {
+      setPageWidth(Math.min(800, Math.max(280, window.innerWidth - 24)));
+    };
+    window.addEventListener('resize', onResize);
+    onResize();
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const isMobile = pageWidth < 640;
 
   useEffect(() => {
     const fetchDocument = async () => {
@@ -142,17 +159,18 @@ export default function DocumentViewer() {
   return (
     <div className="min-h-screen bg-zinc-900 flex flex-col select-none">
       {/* Header */}
-      <div className="bg-zinc-950 border-b border-zinc-800 p-4 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-4">
+      <div className="bg-zinc-950 border-b border-zinc-800 px-3 sm:px-4 py-3 flex items-center justify-between gap-2 sticky top-0 z-50">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
           <button
             onClick={() => navigate('/')}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-full transition-colors"
+            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-full transition-colors flex-shrink-0"
+            aria-label="Back"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-white font-medium truncate max-w-md">{documentData.title}</h1>
+          <h1 className="text-white text-sm sm:text-base font-medium truncate">{documentData.title}</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
           {(profile?.role === 'admin' || documentData.allowDownload) && (
             <button
               onClick={async () => {
@@ -170,39 +188,46 @@ export default function DocumentViewer() {
                 }
                 window.open(documentData.fileUrl, '_blank');
               }}
-              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-lg transition-colors"
+              className="px-2.5 sm:px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white text-xs sm:text-sm font-medium rounded-lg transition-colors"
             >
               Download
             </button>
           )}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full">
-            <ShieldAlert className="w-4 h-4 text-red-500" />
-            <span className="text-xs font-medium text-red-500 uppercase tracking-wider">Confidential</span>
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full">
+            <ShieldAlert className="w-4 h-4 text-red-500 flex-shrink-0" />
+            <span className="hidden sm:inline text-xs font-medium text-red-500 uppercase tracking-wider">Confidential</span>
           </div>
         </div>
       </div>
 
       {/* Viewer Area */}
-      <div className="flex-1 relative overflow-auto flex justify-center p-8 bg-zinc-900">
+      <div className="flex-1 relative overflow-auto flex justify-center p-2 sm:p-8 bg-zinc-900">
         {!isFocused ? (
-          <div className="absolute inset-0 z-50 bg-zinc-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white">
+          <div className="absolute inset-0 z-50 bg-zinc-900/95 backdrop-blur-xl flex flex-col items-center justify-center text-white p-6 text-center">
             <ShieldAlert className="w-16 h-16 text-red-500 mb-4" />
             <h2 className="text-2xl font-bold mb-2">Content Protected</h2>
             <p className="text-zinc-400">Please return focus to the window to continue viewing.</p>
           </div>
         ) : (
-          <div className="relative max-w-5xl w-full bg-white shadow-2xl rounded-sm overflow-hidden" style={{ minHeight: '800px' }}>
+          <div
+            className="relative max-w-5xl w-full bg-white shadow-2xl rounded-sm overflow-hidden"
+            style={{ minHeight: isMobile ? '400px' : '800px' }}
+          >
             {/* Watermark Overlay */}
-            <div className="absolute inset-0 z-40 pointer-events-none overflow-hidden opacity-10 flex flex-wrap items-center justify-center gap-12 p-12">
-              {Array.from({ length: 20 }).map((_, i) => (
+            <div
+              className={`absolute inset-0 z-40 pointer-events-none overflow-hidden opacity-10 flex flex-wrap items-center justify-center ${
+                isMobile ? 'gap-6 p-4' : 'gap-12 p-12'
+              }`}
+            >
+              {Array.from({ length: isMobile ? 8 : 20 }).map((_, i) => (
                 <div key={i} className="transform -rotate-45 flex flex-col items-center justify-center">
-                  <img 
-                    src="https://olive-characteristic-crab-262.mypinata.cloud/ipfs/bafkreicpn2jxtbgciiq3bovhukqg6iixbckc632vgj6blvc2xo7ldfahzm" 
+                  <img
+                    src="https://olive-characteristic-crab-262.mypinata.cloud/ipfs/bafkreicpn2jxtbgciiq3bovhukqg6iixbckc632vgj6blvc2xo7ldfahzm"
                     alt="Watermark"
-                    className="w-48 h-auto mb-2"
+                    className={isMobile ? 'w-24 h-auto mb-1' : 'w-48 h-auto mb-2'}
                     referrerPolicy="no-referrer"
                   />
-                  <div className="text-black font-bold text-xl whitespace-nowrap text-center">
+                  <div className={`text-black font-bold whitespace-nowrap text-center ${isMobile ? 'text-xs' : 'text-xl'}`}>
                     {profile?.email} <br/> {new Date().toISOString().split('T')[0]}
                   </div>
                 </div>
@@ -210,15 +235,9 @@ export default function DocumentViewer() {
             </div>
 
             {isPdf ? (
-              <div className="flex flex-col items-center py-8">
+              <div className="flex flex-col items-center py-4 sm:py-8">
                 {(() => {
                   const viewerSrc = `/api/proxy-pdf?url=${encodeURIComponent(documentData.fileUrl)}`;
-                  
-                  console.log("Document ID:", id);
-                  console.log("Resolved document:", documentData);
-                  console.log("PDF URL:", documentData.fileUrl);
-                  console.log("Viewer src:", viewerSrc);
-
                   return (
                     <Document
                       file={viewerSrc}
@@ -227,45 +246,45 @@ export default function DocumentViewer() {
                         console.error('Error while loading document!', error);
                         setPdfError(error);
                       }}
-                  loading={<Loader2 className="w-8 h-8 animate-spin text-zinc-400 my-12" />}
-                  error={
-                    <div className="flex flex-col items-center justify-center p-12 text-center">
-                      <ShieldAlert className="w-12 h-12 text-red-500 mb-4" />
-                      <p className="text-zinc-900 font-medium">Failed to load PDF</p>
-                      <p className="text-zinc-500 text-sm mt-2">{pdfError?.message || 'The document could not be rendered.'}</p>
-                    </div>
-                  }
-                  className="flex flex-col items-center gap-8"
-                >
-                  {Array.from(new Array(numPages || 0), (el, index) => (
-                    <div key={`page_${index + 1}`} className="shadow-lg border border-zinc-200">
-                      <Page 
-                        pageNumber={index + 1} 
-                        renderTextLayer={false}
-                        renderAnnotationLayer={false}
-                        width={800}
-                      />
-                    </div>
-                  ))}
+                      loading={<Loader2 className="w-8 h-8 animate-spin text-zinc-400 my-12" />}
+                      error={
+                        <div className="flex flex-col items-center justify-center p-6 sm:p-12 text-center">
+                          <ShieldAlert className="w-12 h-12 text-red-500 mb-4" />
+                          <p className="text-zinc-900 font-medium">Failed to load PDF</p>
+                          <p className="text-zinc-500 text-sm mt-2">{pdfError?.message || 'The document could not be rendered.'}</p>
+                        </div>
+                      }
+                      className="flex flex-col items-center gap-4 sm:gap-8"
+                    >
+                      {Array.from(new Array(numPages || 0), (_el, index) => (
+                        <div key={`page_${index + 1}`} className="shadow-lg border border-zinc-200 max-w-full">
+                          <Page
+                            pageNumber={index + 1}
+                            renderTextLayer={false}
+                            renderAnnotationLayer={false}
+                            width={pageWidth}
+                          />
+                        </div>
+                      ))}
                     </Document>
                   );
                 })()}
               </div>
             ) : isImage ? (
-              <img 
-                src={documentData.fileUrl} 
+              <img
+                src={documentData.fileUrl}
                 alt={documentData.title}
                 className="w-full h-auto object-contain"
                 onContextMenu={(e) => e.preventDefault()}
                 draggable={false}
               />
             ) : (
-              <div className="flex flex-col items-center justify-center h-full py-24 text-zinc-500">
+              <div className="flex flex-col items-center justify-center h-full py-12 sm:py-24 text-zinc-500 px-4 text-center">
                 <p>Preview not available for this file type.</p>
                 {(profile?.role === 'admin' || documentData.allowDownload) && (
-                  <a 
-                    href={documentData.fileUrl} 
-                    target="_blank" 
+                  <a
+                    href={documentData.fileUrl}
+                    target="_blank"
                     rel="noopener noreferrer"
                     className="mt-4 px-4 py-2 bg-zinc-900 text-white rounded-lg hover:bg-zinc-800"
                   >
