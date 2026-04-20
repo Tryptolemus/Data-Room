@@ -36,6 +36,7 @@ import {
   Home,
   Move,
   GripVertical,
+  Pencil,
 } from 'lucide-react';
 
 const naturalCompare = (a: string, b: string) =>
@@ -102,6 +103,12 @@ export default function Documents() {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [folderToDelete, setFolderToDelete] = useState<FolderItem | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<DocumentItem | null>(null);
+
+  type RenameTarget =
+    | { kind: 'project'; id: string; currentName: string }
+    | { kind: 'folder'; id: string; currentName: string }
+    | { kind: 'document'; id: string; currentName: string };
+  const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -271,6 +278,23 @@ export default function Documents() {
     } catch (err) {
       console.error('Error moving folder:', err);
       alert('Failed to move folder.');
+    }
+  };
+
+  const renameItem = async (target: RenameTarget, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === target.currentName) return;
+    try {
+      if (target.kind === 'project') {
+        await updateDoc(doc(db, 'projects', target.id), { name: trimmed });
+      } else if (target.kind === 'folder') {
+        await updateDoc(doc(db, 'folders', target.id), { name: trimmed });
+      } else {
+        await updateDoc(doc(db, 'documents', target.id), { title: trimmed });
+      }
+    } catch (err: any) {
+      console.error('Error renaming item:', err);
+      alert('Failed to rename: ' + (err?.message || 'unknown error'));
     }
   };
 
@@ -686,7 +710,16 @@ export default function Documents() {
                   </div>
                 </button>
                 {isAdmin && (
-                  <div className="mt-4 pt-3 border-t border-zinc-100 flex justify-end">
+                  <div className="mt-4 pt-3 border-t border-zinc-100 flex justify-between">
+                    <button
+                      onClick={() =>
+                        setRenameTarget({ kind: 'project', id: p.id, currentName: p.name })
+                      }
+                      className="inline-flex items-center text-xs text-zinc-600 hover:text-zinc-900"
+                      title="Rename project"
+                    >
+                      <Pencil className="w-3.5 h-3.5 mr-1" /> Rename
+                    </button>
                     <button
                       onClick={() => setProjectToDelete(p)}
                       className="inline-flex items-center text-xs text-red-600 hover:text-red-800"
@@ -739,6 +772,19 @@ export default function Documents() {
                               title="Move to a project"
                             >
                               <Move className="w-3.5 h-3.5 mr-1" /> Move to project
+                            </button>
+                            <button
+                              onClick={() =>
+                                setRenameTarget({
+                                  kind: 'document',
+                                  id: d.id,
+                                  currentName: d.title,
+                                })
+                              }
+                              className="p-1.5 rounded text-zinc-600 hover:bg-zinc-100"
+                              title="Rename"
+                            >
+                              <Pencil className="w-4 h-4" />
                             </button>
                             <Link
                               to={`/view/${d.id}`}
@@ -798,6 +844,17 @@ export default function Documents() {
             onSubmit={async (projectId, folderId) => {
               await migrateDocument(docToMigrate.id, projectId, folderId);
               setDocToMigrate(null);
+            }}
+          />
+        )}
+
+        {renameTarget && (
+          <RenameModal
+            target={renameTarget}
+            onClose={() => setRenameTarget(null)}
+            onSubmit={async (newName) => {
+              await renameItem(renameTarget, newName);
+              setRenameTarget(null);
             }}
           />
         )}
@@ -1000,13 +1057,28 @@ export default function Documents() {
                         </button>
                       </div>
                       {isAdmin && (
-                        <button
-                          onClick={() => setFolderToDelete(f)}
-                          className="ml-4 p-2 rounded-full text-red-700 bg-red-50 hover:bg-red-100"
-                          title="Delete folder"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                          <button
+                            onClick={() =>
+                              setRenameTarget({
+                                kind: 'folder',
+                                id: f.id,
+                                currentName: f.name,
+                              })
+                            }
+                            className="p-2 rounded-full text-zinc-700 bg-zinc-100 hover:bg-zinc-200"
+                            title="Rename folder"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setFolderToDelete(f)}
+                            className="p-2 rounded-full text-red-700 bg-red-50 hover:bg-red-100"
+                            title="Delete folder"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </li>
@@ -1062,6 +1134,19 @@ export default function Documents() {
                       {isAdmin && (
                         <>
                           <button
+                            onClick={() =>
+                              setRenameTarget({
+                                kind: 'document',
+                                id: d.id,
+                                currentName: d.title,
+                              })
+                            }
+                            className="inline-flex items-center p-2 rounded-full text-zinc-700 bg-zinc-100 hover:bg-zinc-200"
+                            title="Rename document"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
                             onClick={() => toggleDownload(d.id, !!d.allowDownload)}
                             className={`inline-flex items-center p-2 rounded-full ${
                               d.allowDownload
@@ -1116,6 +1201,17 @@ export default function Documents() {
           message={`Delete "${folderToDelete.name}" and all its contents? This cannot be undone.`}
           onCancel={() => setFolderToDelete(null)}
           onConfirm={confirmDeleteFolder}
+        />
+      )}
+
+      {renameTarget && (
+        <RenameModal
+          target={renameTarget}
+          onClose={() => setRenameTarget(null)}
+          onSubmit={async (newName) => {
+            await renameItem(renameTarget, newName);
+            setRenameTarget(null);
+          }}
         />
       )}
     </div>
@@ -1432,6 +1528,73 @@ function MigrateDocumentModal({
             className="px-4 py-2 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg disabled:opacity-50"
           >
             {submitting ? 'Moving...' : 'Move'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function RenameModal({
+  target,
+  onClose,
+  onSubmit,
+}: {
+  target: { kind: 'project' | 'folder' | 'document'; id: string; currentName: string };
+  onClose: () => void;
+  onSubmit: (newName: string) => Promise<void>;
+}) {
+  const [name, setName] = useState(target.currentName);
+  const [submitting, setSubmitting] = useState(false);
+  const label =
+    target.kind === 'project'
+      ? 'Project name'
+      : target.kind === 'folder'
+      ? 'Folder name'
+      : 'File name';
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || name.trim() === target.currentName) {
+      onClose();
+      return;
+    }
+    setSubmitting(true);
+    await onSubmit(name);
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl"
+      >
+        <h3 className="text-lg font-semibold text-zinc-900 mb-4">Rename</h3>
+        <label className="block text-xs font-medium text-zinc-700 mb-1">{label}</label>
+        <input
+          autoFocus
+          type="text"
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onFocus={(e) => e.currentTarget.select()}
+          className="block w-full rounded-lg border-zinc-300 focus:ring-zinc-500 focus:border-zinc-500 sm:text-sm px-3 py-2 border"
+        />
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting || !name.trim()}
+            className="px-4 py-2 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg disabled:opacity-50"
+          >
+            {submitting ? 'Saving...' : 'Save'}
           </button>
         </div>
       </form>
