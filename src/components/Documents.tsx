@@ -12,6 +12,8 @@ import {
   doc,
   orderBy,
   getDocs,
+  Query,
+  DocumentData,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import {
@@ -78,6 +80,7 @@ export default function Documents() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
 
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -102,15 +105,12 @@ export default function Documents() {
   useEffect(() => {
     if (!profile) return;
 
-    let q;
-    if (isAdmin) {
-      q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
-    } else {
-      q = query(
-        collection(db, 'projects'),
-        where('allowedEmails', 'array-contains', profile.email)
-      );
-    }
+    const q: Query<DocumentData> = isAdmin
+      ? query(collection(db, 'projects'), orderBy('createdAt', 'desc'))
+      : query(
+          collection(db, 'projects'),
+          where('allowedEmails', 'array-contains', profile.email)
+        );
 
     const unsubscribe = onSnapshot(
       q,
@@ -118,10 +118,16 @@ export default function Documents() {
         const items = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Project[];
         items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
         setProjects(items);
+        setProjectsError(null);
         setProjectsLoading(false);
       },
-      (error) => {
+      (error: any) => {
         console.error('Error fetching projects:', error);
+        setProjectsError(
+          error?.code === 'permission-denied'
+            ? 'Permission denied reading projects. The updated firestore.rules need to be deployed to Firebase.'
+            : error?.message || 'Failed to load projects.'
+        );
         setProjectsLoading(false);
       }
     );
@@ -246,9 +252,13 @@ export default function Documents() {
       });
       setCreatingProject(false);
       goToProject(ref.id);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error creating project:', err);
-      alert('Failed to create project.');
+      const msg =
+        err?.code === 'permission-denied'
+          ? 'Permission denied. The updated firestore.rules need to be deployed to Firebase before projects can be created.'
+          : err?.message || 'Failed to create project.';
+      alert(msg);
     }
   };
 
@@ -522,6 +532,16 @@ export default function Documents() {
             </button>
           )}
         </div>
+
+        {projectsError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
+            <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="text-sm font-medium text-red-800">Can&apos;t load projects</h3>
+              <p className="mt-1 text-sm text-red-700">{projectsError}</p>
+            </div>
+          </div>
+        )}
 
         {projectsLoading ? (
           <div className="flex justify-center py-12">

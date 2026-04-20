@@ -45,25 +45,46 @@ export default function AccessControl() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'allowedEmails'), orderBy('addedAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setEmails(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-      setLoading(false);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setEmails(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+        setLoading(false);
+      },
+      (err) => {
+        console.error('Error fetching allowedEmails:', err);
+        setLoading(false);
+      }
+    );
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
     const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setProjects(
-        snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Project[]
-      );
-      setProjectsLoading(false);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setProjects(
+          snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Project[]
+        );
+        setProjectsError(null);
+        setProjectsLoading(false);
+      },
+      (err) => {
+        console.error('Error fetching projects:', err);
+        setProjectsError(
+          err?.code === 'permission-denied'
+            ? 'Permission denied reading projects. Make sure the updated firestore.rules have been deployed to Firebase.'
+            : err?.message || 'Failed to load projects.'
+        );
+        setProjectsLoading(false);
+      }
+    );
     return () => unsubscribe();
   }, []);
 
@@ -221,7 +242,15 @@ export default function AccessControl() {
           </p>
         </div>
 
-        {projectsLoading ? (
+        {projectsError ? (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
+            <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5 mr-3 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="text-sm font-medium text-red-800">Can&apos;t load projects</h3>
+              <p className="mt-1 text-sm text-red-700">{projectsError}</p>
+            </div>
+          </div>
+        ) : projectsLoading ? (
           <div className="flex justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
           </div>
