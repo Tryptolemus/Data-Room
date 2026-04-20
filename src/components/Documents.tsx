@@ -833,9 +833,9 @@ export default function Documents() {
   if (!currentProjectId) {
     return (
       <div className="space-y-6 relative">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-zinc-900">Projects</h1>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-zinc-900">Projects</h1>
             <p className="text-sm text-zinc-500 mt-1">
               {isGlobalAdmin
                 ? 'Organize documents into projects and grant access per project.'
@@ -845,9 +845,10 @@ export default function Documents() {
           {isGlobalAdmin && (
             <button
               onClick={() => setCreatingProject(true)}
-              className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg shadow-sm text-white bg-zinc-900 hover:bg-zinc-800 transition-colors"
+              className="inline-flex items-center px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium rounded-lg shadow-sm text-white bg-zinc-900 hover:bg-zinc-800 transition-colors flex-shrink-0"
             >
-              <Plus className="w-4 h-4 mr-2" /> New Project
+              <Plus className="w-4 h-4 mr-1.5 sm:mr-2" />
+              <span className="hidden sm:inline">New </span>Project
             </button>
           )}
         </div>
@@ -1136,9 +1137,9 @@ export default function Documents() {
           ))}
         </div>
 
-        <div className="flex items-start justify-between mt-3">
-          <div>
-            <h1 className="text-2xl font-bold text-zinc-900">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mt-3">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-zinc-900 truncate">
               {breadcrumb.length > 0 ? breadcrumb[breadcrumb.length - 1].name : currentProject?.name}
             </h1>
             {!breadcrumb.length && currentProject?.description && (
@@ -1146,12 +1147,13 @@ export default function Documents() {
             )}
           </div>
           {canEditCurrentProject && (
-            <div className="flex gap-2 flex-wrap justify-end">
+            <div className="flex gap-2 flex-wrap sm:justify-end">
               <button
                 onClick={() => setCreatingFolder(true)}
-                className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700"
+                className="inline-flex items-center px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-medium rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700"
               >
-                <FolderPlus className="w-4 h-4 mr-2" /> New Folder
+                <FolderPlus className="w-4 h-4 mr-1.5 sm:mr-2" />
+                <span className="hidden sm:inline">New </span>Folder
               </button>
               <input
                 ref={fileInputRef}
@@ -1165,9 +1167,10 @@ export default function Documents() {
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 disabled:opacity-50"
+                className="inline-flex items-center px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-medium rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 disabled:opacity-50"
               >
-                <Upload className="w-4 h-4 mr-2" /> Upload Files
+                <Upload className="w-4 h-4 mr-1.5 sm:mr-2" />
+                <span className="hidden sm:inline">Upload </span>Files
               </button>
               <input
                 ref={folderInputRef}
@@ -1181,9 +1184,10 @@ export default function Documents() {
               <button
                 onClick={() => folderInputRef.current?.click()}
                 disabled={uploading}
-                className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg shadow-sm text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
+                className="inline-flex items-center px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-medium rounded-lg shadow-sm text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
               >
-                <FolderUp className="w-4 h-4 mr-2" /> Upload Folder
+                <FolderUp className="w-4 h-4 mr-1.5 sm:mr-2" />
+                <span className="hidden sm:inline">Upload </span>Folder
               </button>
             </div>
           )}
@@ -1259,17 +1263,17 @@ export default function Documents() {
                       showAfter ? 'after:content-[""] after:absolute after:left-0 after:right-0 after:bottom-0 after:h-0.5 after:bg-indigo-500 after:z-10' : ''
                     }`}
                   >
-                    <div className="px-6 py-4 flex items-center justify-between">
+                    <div className="px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
                       <div className="flex items-center min-w-0 gap-2 flex-1">
                         {canEditCurrentProject && (
-                          <GripVertical className="w-4 h-4 text-zinc-300 flex-shrink-0 cursor-grab" />
+                          <GripVertical className="w-4 h-4 text-zinc-300 flex-shrink-0 cursor-grab hidden sm:block" />
                         )}
                         <button
                           onClick={() => goToFolder(f.id)}
                           className="flex items-center min-w-0 gap-4 flex-1 text-left"
                         >
-                          <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 flex-shrink-0">
-                            <Folder className="w-5 h-5" />
+                          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 flex-shrink-0">
+                            <Folder className="w-4 h-4 sm:w-5 sm:h-5" />
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-zinc-900 truncate">{f.name}</p>
@@ -1280,7 +1284,7 @@ export default function Documents() {
                         </button>
                       </div>
                       {canEditCurrentProject && (
-                        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                        <div className="flex items-center gap-1 sm:gap-2 ml-2 sm:ml-4 flex-shrink-0">
                           <button
                             onClick={() =>
                               setRenameTarget({
@@ -1289,14 +1293,14 @@ export default function Documents() {
                                 currentName: f.name,
                               })
                             }
-                            className="p-2 rounded-full text-zinc-700 bg-zinc-100 hover:bg-zinc-200"
+                            className="p-1.5 sm:p-2 rounded-full text-zinc-700 bg-zinc-100 hover:bg-zinc-200"
                             title="Rename folder"
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => setFolderToDelete(f)}
-                            className="p-2 rounded-full text-red-700 bg-red-50 hover:bg-red-100"
+                            className="p-1.5 sm:p-2 rounded-full text-red-700 bg-red-50 hover:bg-red-100"
                             title="Delete folder"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -1339,13 +1343,13 @@ export default function Documents() {
                     showAfter ? 'after:content-[""] after:absolute after:left-0 after:right-0 after:bottom-0 after:h-0.5 after:bg-indigo-500 after:z-10' : ''
                   }`}
                 >
-                  <div className="px-6 py-4 flex items-center justify-between">
+                  <div className="px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
                     <div className="flex items-center min-w-0 gap-2 flex-1">
                       {canEditCurrentProject && (
-                        <GripVertical className="w-4 h-4 text-zinc-300 flex-shrink-0 cursor-grab" />
+                        <GripVertical className="w-4 h-4 text-zinc-300 flex-shrink-0 cursor-grab hidden sm:block" />
                       )}
-                      <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 flex-shrink-0">
-                        <FileText className="w-5 h-5" />
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 flex-shrink-0">
+                        <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
@@ -1369,10 +1373,10 @@ export default function Documents() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                    <div className="flex items-center gap-1 sm:gap-2 ml-2 sm:ml-4 flex-shrink-0">
                       <Link
                         to={`/view/${d.id}`}
-                        className="inline-flex items-center p-2 rounded-full text-zinc-700 bg-zinc-100 hover:bg-zinc-200"
+                        className="inline-flex items-center p-1.5 sm:p-2 rounded-full text-zinc-700 bg-zinc-100 hover:bg-zinc-200"
                         title="View Document"
                       >
                         <Eye className="w-4 h-4" />
@@ -1387,7 +1391,7 @@ export default function Documents() {
                                 currentName: d.title,
                               })
                             }
-                            className="inline-flex items-center p-2 rounded-full text-zinc-700 bg-zinc-100 hover:bg-zinc-200"
+                            className="inline-flex items-center p-1.5 sm:p-2 rounded-full text-zinc-700 bg-zinc-100 hover:bg-zinc-200"
                             title="Rename document"
                           >
                             <Pencil className="w-4 h-4" />
@@ -1395,7 +1399,7 @@ export default function Documents() {
                           {canAdminCurrentProject && (
                             <button
                               onClick={() => setVisibilityTarget(d)}
-                              className={`inline-flex items-center p-2 rounded-full ${
+                              className={`inline-flex items-center p-1.5 sm:p-2 rounded-full ${
                                 isRestricted
                                   ? 'text-purple-700 bg-purple-50 hover:bg-purple-100'
                                   : 'text-zinc-700 bg-zinc-100 hover:bg-zinc-200'
@@ -1411,7 +1415,7 @@ export default function Documents() {
                           )}
                           <button
                             onClick={() => toggleDownload(d.id, !!d.allowDownload)}
-                            className={`inline-flex items-center p-2 rounded-full ${
+                            className={`inline-flex items-center p-1.5 sm:p-2 rounded-full ${
                               d.allowDownload
                                 ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
                                 : 'text-amber-700 bg-amber-50 hover:bg-amber-100'
@@ -1426,7 +1430,7 @@ export default function Documents() {
                           </button>
                           <button
                             onClick={() => setDocumentToDelete(d)}
-                            className="inline-flex items-center p-2 rounded-full text-red-700 bg-red-50 hover:bg-red-100"
+                            className="inline-flex items-center p-1.5 sm:p-2 rounded-full text-red-700 bg-red-50 hover:bg-red-100"
                             title="Delete Document"
                           >
                             <Trash2 className="w-4 h-4" />

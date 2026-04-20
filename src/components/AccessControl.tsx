@@ -25,6 +25,7 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  Activity,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -286,20 +287,20 @@ export default function AccessControl() {
             <ul className="divide-y divide-zinc-200">
               {emails.map((item) => (
                 <li key={item.id} className="hover:bg-zinc-50 transition-colors">
-                  <div className="px-6 py-4 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-4 min-w-0 flex-1">
-                      <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 flex-shrink-0">
-                        <Shield className="w-5 h-5" />
+                  <div className="px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2 sm:gap-4">
+                    <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 flex-shrink-0">
+                        <Shield className="w-4 h-4 sm:w-5 sm:h-5" />
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-zinc-900 truncate">{item.email}</p>
-                        <p className="text-xs text-zinc-500 mt-0.5">
+                        <p className="text-xs text-zinc-500 mt-0.5 hidden sm:block">
                           Added {format(new Date(item.addedAt), 'MMM d, yyyy')} by {item.addedBy}
                         </p>
                       </div>
                     </div>
                     <label
-                      className="flex items-center gap-2 text-xs text-zinc-600 cursor-pointer select-none"
+                      className="flex items-center gap-1.5 text-xs text-zinc-600 cursor-pointer select-none flex-shrink-0"
                       title="Allow this user to see the Analytics tab. Data is still scoped to projects they can access."
                     >
                       <input
@@ -307,11 +308,14 @@ export default function AccessControl() {
                         checked={!!item.canViewAnalytics}
                         onChange={(e) => toggleAnalyticsAccess(item.id, e.target.checked)}
                       />
-                      Analytics
+                      <span className="hidden sm:inline">Analytics</span>
+                      <span className="sm:hidden" aria-label="Analytics">
+                        <Activity className="w-4 h-4" />
+                      </span>
                     </label>
                     <button
                       onClick={() => setEmailToDelete(item.id)}
-                      className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors flex-shrink-0"
+                      className="inline-flex items-center p-1.5 sm:p-2 border border-transparent rounded-full shadow-sm text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors flex-shrink-0"
                       title="Revoke Access"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -452,7 +456,7 @@ function ProjectAccessRow({
     <li>
       <button
         onClick={onToggle}
-        className="w-full px-6 py-4 flex items-center justify-between hover:bg-zinc-50 transition-colors text-left"
+        className="w-full px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between hover:bg-zinc-50 transition-colors text-left"
       >
         <div className="flex items-center gap-3">
           {expanded ? (
@@ -473,8 +477,8 @@ function ProjectAccessRow({
       </button>
 
       {expanded && (
-        <div className="px-6 pb-5 pt-1 bg-zinc-50 border-t border-zinc-200">
-          <form onSubmit={handleAdd} className="flex gap-2 mt-4">
+        <div className="px-4 sm:px-6 pb-5 pt-1 bg-zinc-50 border-t border-zinc-200">
+          <form onSubmit={handleAdd} className="flex flex-col sm:flex-row gap-2 mt-4">
             <input
               type="email"
               list={`authorized-emails-${project.id}`}
@@ -490,23 +494,25 @@ function ProjectAccessRow({
                   <option key={e} value={e} />
                 ))}
             </datalist>
-            <select
-              value={inputRole}
-              onChange={(e) => setInputRole(e.target.value as ProjectRole)}
-              className="rounded-lg border-zinc-300 focus:ring-zinc-500 focus:border-zinc-500 text-sm px-3 py-2 border"
-              title="Role"
-            >
-              <option value="viewer">Viewer</option>
-              <option value="editor">Editor</option>
-              <option value="admin">Admin</option>
-            </select>
-            <button
-              type="submit"
-              disabled={busy || !input.trim()}
-              className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
-            >
-              <UserPlus className="w-4 h-4 mr-1.5" /> Grant
-            </button>
+            <div className="flex gap-2">
+              <select
+                value={inputRole}
+                onChange={(e) => setInputRole(e.target.value as ProjectRole)}
+                className="flex-1 sm:flex-initial rounded-lg border-zinc-300 focus:ring-zinc-500 focus:border-zinc-500 text-sm px-3 py-2 border"
+                title="Role"
+              >
+                <option value="viewer">Viewer</option>
+                <option value="editor">Editor</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button
+                type="submit"
+                disabled={busy || !input.trim()}
+                className="inline-flex items-center justify-center px-3 py-2 text-sm font-medium rounded-lg text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 flex-shrink-0"
+              >
+                <UserPlus className="w-4 h-4 mr-1.5" /> Grant
+              </button>
+            </div>
           </form>
 
           {members.length === 0 ? (
