@@ -34,7 +34,12 @@ import {
   Plus,
   ArrowLeft,
   Home,
+  Move,
+  GripVertical,
 } from 'lucide-react';
+
+const naturalCompare = (a: string, b: string) =>
+  a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 import { format } from 'date-fns';
 import { Link, useSearchParams } from 'react-router-dom';
 
@@ -228,6 +233,100 @@ export default function Documents() {
     }
     return chain;
   }, [folders, currentFolderId]);
+
+  // ---- Drag & drop (admin only) ----
+  type DragItem = { type: 'document' | 'folder'; id: string };
+  const [dragging, setDragging] = useState<DragItem | null>(null);
+  // `'root'` = project root, otherwise a folder id.
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  const [docToMigrate, setDocToMigrate] = useState<DocumentItem | null>(null);
+
+  const isFolderDescendantOf = (candidateId: string, ancestorId: string): boolean => {
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    let cur = byId.get(candidateId);
+    while (cur) {
+      if (cur.id === ancestorId) return true;
+      if (!cur.parentFolderId) return false;
+      cur = byId.get(cur.parentFolderId);
+    }
+    return false;
+  };
+
+  const moveDocument = async (docId: string, targetFolderId: string | null) => {
+    try {
+      await updateDoc(doc(db, 'documents', docId), { folderId: targetFolderId });
+    } catch (err) {
+      console.error('Error moving document:', err);
+      alert('Failed to move document.');
+    }
+  };
+
+  const moveFolder = async (folderId: string, targetParentId: string | null) => {
+    if (targetParentId && isFolderDescendantOf(targetParentId, folderId)) {
+      alert('Cannot move a folder into itself or one of its subfolders.');
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'folders', folderId), { parentFolderId: targetParentId });
+    } catch (err) {
+      console.error('Error moving folder:', err);
+      alert('Failed to move folder.');
+    }
+  };
+
+  const migrateDocument = async (
+    docId: string,
+    targetProjectId: string,
+    targetFolderId: string | null
+  ) => {
+    try {
+      await updateDoc(doc(db, 'documents', docId), {
+        projectId: targetProjectId,
+        folderId: targetFolderId,
+      });
+    } catch (err: any) {
+      console.error('Error migrating document:', err);
+      alert('Failed to migrate: ' + (err?.message || 'unknown error'));
+    }
+  };
+
+  // Shared drag handlers.
+  const handleDragStart = (item: DragItem) => (e: React.DragEvent) => {
+    setDragging(item);
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', `${item.type}:${item.id}`);
+    } catch {
+      /* ignore */
+    }
+  };
+  const handleDragEnd = () => {
+    setDragging(null);
+    setDragOver(null);
+  };
+  const handleDragOver = (targetFolderId: string | 'root') => (e: React.DragEvent) => {
+    if (!dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOver(targetFolderId);
+  };
+  const handleDrop = (targetFolderId: string | null) => async (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!dragging) return;
+    const { type, id } = dragging;
+    setDragging(null);
+    setDragOver(null);
+    if (type === 'document') {
+      const current = documents.find((d) => d.id === id);
+      if (current && (current.folderId || null) === targetFolderId) return;
+      await moveDocument(id, targetFolderId);
+    } else if (type === 'folder') {
+      if (id === targetFolderId) return;
+      const current = folders.find((f) => f.id === id);
+      if (current && (current.parentFolderId || null) === targetFolderId) return;
+      await moveFolder(id, targetFolderId);
+    }
+  };
 
   const goToProjects = () => setSearchParams({});
   const goToProject = (projectId: string) => setSearchParams({ project: projectId });
@@ -618,36 +717,46 @@ export default function Documents() {
                   </p>
                 ) : (
                   <ul className="divide-y divide-zinc-200">
-                    {legacyDocs.map((d) => (
-                      <li
-                        key={d.id}
-                        className="px-6 py-3 flex items-center justify-between hover:bg-zinc-50"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <FileText className="w-4 h-4 text-zinc-400 flex-shrink-0" />
-                          <span className="text-sm text-zinc-900 truncate">{d.title}</span>
-                          <span className="text-xs text-zinc-500 flex-shrink-0">
-                            {format(new Date(d.uploadedAt), 'MMM d, yyyy')}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <Link
-                            to={`/view/${d.id}`}
-                            className="p-1.5 rounded text-zinc-600 hover:bg-zinc-100"
-                            title="View"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Link>
-                          <button
-                            onClick={() => setDocumentToDelete(d)}
-                            className="p-1.5 rounded text-red-600 hover:bg-red-50"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </li>
-                    ))}
+                    {legacyDocs
+                      .slice()
+                      .sort((a, b) => naturalCompare(a.title, b.title))
+                      .map((d) => (
+                        <li
+                          key={d.id}
+                          className="px-6 py-3 flex items-center justify-between hover:bg-zinc-50"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <FileText className="w-4 h-4 text-zinc-400 flex-shrink-0" />
+                            <span className="text-sm text-zinc-900 truncate">{d.title}</span>
+                            <span className="text-xs text-zinc-500 flex-shrink-0">
+                              {format(new Date(d.uploadedAt), 'MMM d, yyyy')}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                              onClick={() => setDocToMigrate(d)}
+                              className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
+                              title="Move to a project"
+                            >
+                              <Move className="w-3.5 h-3.5 mr-1" /> Move to project
+                            </button>
+                            <Link
+                              to={`/view/${d.id}`}
+                              className="p-1.5 rounded text-zinc-600 hover:bg-zinc-100"
+                              title="View"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Link>
+                            <button
+                              onClick={() => setDocumentToDelete(d)}
+                              className="p-1.5 rounded text-red-600 hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </li>
+                      ))}
                   </ul>
                 )}
               </div>
@@ -677,6 +786,19 @@ export default function Documents() {
             message="Are you sure? This cannot be undone."
             onCancel={() => setDocumentToDelete(null)}
             onConfirm={confirmDeleteDocument}
+          />
+        )}
+
+        {docToMigrate && (
+          <MigrateDocumentModal
+            doc={docToMigrate}
+            projects={projects}
+            folders={folders}
+            onClose={() => setDocToMigrate(null)}
+            onSubmit={async (projectId, folderId) => {
+              await migrateDocument(docToMigrate.id, projectId, folderId);
+              setDocToMigrate(null);
+            }}
           />
         )}
       </div>
@@ -718,7 +840,12 @@ export default function Documents() {
         <div className="flex items-center gap-1.5 text-sm text-zinc-500 flex-wrap">
           <button
             onClick={() => goToFolder(null)}
-            className="inline-flex items-center hover:text-zinc-900 font-medium text-zinc-700"
+            onDragOver={isAdmin ? handleDragOver('root') : undefined}
+            onDragLeave={() => setDragOver((s) => (s === 'root' ? null : s))}
+            onDrop={isAdmin ? handleDrop(null) : undefined}
+            className={`inline-flex items-center hover:text-zinc-900 font-medium text-zinc-700 rounded px-1 ${
+              dragOver === 'root' ? 'bg-indigo-100 ring-1 ring-indigo-400' : ''
+            }`}
           >
             <Home className="w-3.5 h-3.5 mr-1" />
             {currentProject?.name || 'Project'}
@@ -728,7 +855,12 @@ export default function Documents() {
               <ChevronRight className="w-3.5 h-3.5 text-zinc-300" />
               <button
                 onClick={() => goToFolder(f.id)}
-                className="hover:text-zinc-900"
+                onDragOver={isAdmin ? handleDragOver(f.id) : undefined}
+                onDragLeave={() => setDragOver((s) => (s === f.id ? null : s))}
+                onDrop={isAdmin ? handleDrop(f.id) : undefined}
+                className={`hover:text-zinc-900 rounded px-1 ${
+                  dragOver === f.id ? 'bg-indigo-100 ring-1 ring-indigo-400' : ''
+                }`}
               >
                 {f.name}
               </button>
@@ -827,43 +959,80 @@ export default function Documents() {
           <ul className="divide-y divide-zinc-200">
             {visibleFolders
               .slice()
-              .sort((a, b) => a.name.localeCompare(b.name))
-              .map((f) => (
-                <li key={f.id} className="hover:bg-zinc-50 transition-colors">
-                  <div className="px-6 py-4 flex items-center justify-between">
-                    <button
-                      onClick={() => goToFolder(f.id)}
-                      className="flex items-center min-w-0 gap-4 flex-1 text-left"
-                    >
-                      <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 flex-shrink-0">
-                        <Folder className="w-5 h-5" />
+              .sort((a, b) => naturalCompare(a.name, b.name))
+              .map((f) => {
+                const isDropTarget = dragOver === f.id;
+                const isBeingDragged =
+                  dragging?.type === 'folder' && dragging.id === f.id;
+                return (
+                  <li
+                    key={f.id}
+                    draggable={isAdmin}
+                    onDragStart={isAdmin ? handleDragStart({ type: 'folder', id: f.id }) : undefined}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={isAdmin ? handleDragOver(f.id) : undefined}
+                    onDragLeave={() => setDragOver((s) => (s === f.id ? null : s))}
+                    onDrop={isAdmin ? handleDrop(f.id) : undefined}
+                    className={`transition-colors ${
+                      isDropTarget
+                        ? 'bg-indigo-50 ring-2 ring-indigo-400 ring-inset'
+                        : 'hover:bg-zinc-50'
+                    } ${isBeingDragged ? 'opacity-40' : ''}`}
+                  >
+                    <div className="px-6 py-4 flex items-center justify-between">
+                      <div className="flex items-center min-w-0 gap-2 flex-1">
+                        {isAdmin && (
+                          <GripVertical className="w-4 h-4 text-zinc-300 flex-shrink-0 cursor-grab" />
+                        )}
+                        <button
+                          onClick={() => goToFolder(f.id)}
+                          className="flex items-center min-w-0 gap-4 flex-1 text-left"
+                        >
+                          <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 flex-shrink-0">
+                            <Folder className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-zinc-900 truncate">{f.name}</p>
+                            <p className="text-xs text-zinc-500 mt-0.5">
+                              Folder &bull; Created {format(new Date(f.createdAt), 'MMM d, yyyy')}
+                            </p>
+                          </div>
+                        </button>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-zinc-900 truncate">{f.name}</p>
-                        <p className="text-xs text-zinc-500 mt-0.5">
-                          Folder &bull; Created {format(new Date(f.createdAt), 'MMM d, yyyy')}
-                        </p>
-                      </div>
-                    </button>
-                    {isAdmin && (
-                      <button
-                        onClick={() => setFolderToDelete(f)}
-                        className="ml-4 p-2 rounded-full text-red-700 bg-red-50 hover:bg-red-100"
-                        title="Delete folder"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
+                      {isAdmin && (
+                        <button
+                          onClick={() => setFolderToDelete(f)}
+                          className="ml-4 p-2 rounded-full text-red-700 bg-red-50 hover:bg-red-100"
+                          title="Delete folder"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             {visibleDocuments
               .slice()
-              .sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1))
-              .map((d) => (
-                <li key={d.id} className="hover:bg-zinc-50 transition-colors">
+              .sort((a, b) => naturalCompare(a.title, b.title))
+              .map((d) => {
+                const isBeingDragged =
+                  dragging?.type === 'document' && dragging.id === d.id;
+                return (
+                <li
+                  key={d.id}
+                  draggable={isAdmin}
+                  onDragStart={isAdmin ? handleDragStart({ type: 'document', id: d.id }) : undefined}
+                  onDragEnd={handleDragEnd}
+                  className={`transition-colors hover:bg-zinc-50 ${
+                    isBeingDragged ? 'opacity-40' : ''
+                  }`}
+                >
                   <div className="px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center min-w-0 gap-4">
+                    <div className="flex items-center min-w-0 gap-2 flex-1">
+                      {isAdmin && (
+                        <GripVertical className="w-4 h-4 text-zinc-300 flex-shrink-0 cursor-grab" />
+                      )}
                       <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 flex-shrink-0">
                         <FileText className="w-5 h-5" />
                       </div>
@@ -919,7 +1088,8 @@ export default function Documents() {
                     </div>
                   </div>
                 </li>
-              ))}
+                );
+              })}
           </ul>
         </div>
       )}
@@ -1118,6 +1288,150 @@ function FolderFormModal({
             className="px-4 py-2 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg disabled:opacity-50"
           >
             {submitting ? 'Creating...' : 'Create'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function MigrateDocumentModal({
+  doc: document,
+  projects,
+  folders: preloadedFolders,
+  onClose,
+  onSubmit,
+}: {
+  doc: DocumentItem;
+  projects: Project[];
+  folders: FolderItem[];
+  onClose: () => void;
+  onSubmit: (projectId: string, folderId: string | null) => Promise<void>;
+}) {
+  const [projectId, setProjectId] = useState<string>(projects[0]?.id || '');
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [targetFolders, setTargetFolders] = useState<FolderItem[]>([]);
+  const [loadingFolders, setLoadingFolders] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!projectId) {
+      setTargetFolders([]);
+      return;
+    }
+    const preload = preloadedFolders.filter((f) => f.projectId === projectId);
+    if (preload.length > 0) {
+      setTargetFolders(preload);
+      return;
+    }
+    setLoadingFolders(true);
+    getDocs(query(collection(db, 'folders'), where('projectId', '==', projectId)))
+      .then((snap) => {
+        setTargetFolders(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as FolderItem[]
+        );
+      })
+      .catch((err) => {
+        console.error('Error loading folders for migration:', err);
+      })
+      .finally(() => setLoadingFolders(false));
+  }, [projectId, preloadedFolders]);
+
+  const folderOptions = useMemo(() => {
+    const byId = new Map(targetFolders.map((f) => [f.id, f]));
+    const depth = (id: string): number => {
+      let n = 0;
+      let cur = byId.get(id);
+      while (cur && cur.parentFolderId) {
+        n += 1;
+        cur = byId.get(cur.parentFolderId);
+      }
+      return n;
+    };
+    return targetFolders
+      .slice()
+      .sort((a, b) => naturalCompare(a.name, b.name))
+      .map((f) => ({ id: f.id, label: `${'— '.repeat(depth(f.id))}${f.name}` }));
+  }, [targetFolders]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!projectId) return;
+    setSubmitting(true);
+    await onSubmit(projectId, folderId);
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl"
+      >
+        <h3 className="text-lg font-semibold text-zinc-900 mb-1">Move to project</h3>
+        <p className="text-sm text-zinc-500 mb-4 truncate">&quot;{document.title}&quot;</p>
+
+        {projects.length === 0 ? (
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+            No projects exist yet. Create a project first.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-zinc-700 mb-1">Project</label>
+              <select
+                value={projectId}
+                onChange={(e) => {
+                  setProjectId(e.target.value);
+                  setFolderId(null);
+                }}
+                className="block w-full rounded-lg border-zinc-300 focus:ring-zinc-500 focus:border-zinc-500 sm:text-sm px-3 py-2 border"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-700 mb-1">
+                Folder (optional)
+              </label>
+              <select
+                value={folderId ?? ''}
+                onChange={(e) => setFolderId(e.target.value || null)}
+                disabled={loadingFolders}
+                className="block w-full rounded-lg border-zinc-300 focus:ring-zinc-500 focus:border-zinc-500 sm:text-sm px-3 py-2 border"
+              >
+                <option value="">(Project root)</option>
+                {folderOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {loadingFolders && (
+                <p className="text-xs text-zinc-400 mt-1">Loading folders...</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-zinc-700 bg-zinc-100 hover:bg-zinc-200 rounded-lg"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting || !projectId || projects.length === 0}
+            className="px-4 py-2 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg disabled:opacity-50"
+          >
+            {submitting ? 'Moving...' : 'Move'}
           </button>
         </div>
       </form>
