@@ -149,22 +149,27 @@ export default function AccessControl() {
     email: string
   ) => {
     try {
-      const snap = await getDocs(
-        query(collection(db, 'documents'), where('projectId', '==', projectId))
-      );
+      const [docSnap, folderSnap] = await Promise.all([
+        getDocs(query(collection(db, 'documents'), where('projectId', '==', projectId))),
+        getDocs(query(collection(db, 'folders'), where('projectId', '==', projectId))),
+      ]);
       const writes: Promise<void>[] = [];
-      snap.docs.forEach((d) => {
-        const data = d.data() as any;
-        if (data.visibility === 'restricted') return; // private docs keep their own list
-        writes.push(
-          updateDoc(d.ref, {
-            allowedEmails: op === 'add' ? arrayUnion(email) : arrayRemove(email),
-          }) as unknown as Promise<void>
-        );
-      });
+      const cascade = (snap: typeof docSnap) => {
+        snap.docs.forEach((d) => {
+          const data = d.data() as any;
+          if (data.visibility === 'restricted') return; // private items keep their own list
+          writes.push(
+            updateDoc(d.ref, {
+              allowedEmails: op === 'add' ? arrayUnion(email) : arrayRemove(email),
+            }) as unknown as Promise<void>
+          );
+        });
+      };
+      cascade(docSnap);
+      cascade(folderSnap);
       await Promise.all(writes);
     } catch (err) {
-      console.error('Error cascading project access to docs:', err);
+      console.error('Error cascading project access to docs and folders:', err);
     }
   };
 
@@ -202,28 +207,34 @@ export default function AccessControl() {
     }
   };
 
-  // Backfill: align every document in this project with the current member list.
-  // Non-restricted docs get `allowedEmails` replaced with the project's list.
+  // Backfill: align every document and folder in this project with the current
+  // member list. Non-restricted items get `allowedEmails` replaced with the
+  // project's list; private items keep their own allowlists.
   const syncProjectDocs = async (project: Project) => {
     try {
-      const snap = await getDocs(
-        query(collection(db, 'documents'), where('projectId', '==', project.id))
-      );
+      const [docSnap, folderSnap] = await Promise.all([
+        getDocs(query(collection(db, 'documents'), where('projectId', '==', project.id))),
+        getDocs(query(collection(db, 'folders'), where('projectId', '==', project.id))),
+      ]);
       const writes: Promise<void>[] = [];
-      snap.docs.forEach((d) => {
-        const data = d.data() as any;
-        if (data.visibility === 'restricted') return;
-        writes.push(
-          updateDoc(d.ref, {
-            visibility: 'project',
-            allowedEmails: project.allowedEmails || [],
-          }) as unknown as Promise<void>
-        );
-      });
+      const sync = (snap: typeof docSnap) => {
+        snap.docs.forEach((d) => {
+          const data = d.data() as any;
+          if (data.visibility === 'restricted') return;
+          writes.push(
+            updateDoc(d.ref, {
+              visibility: 'project',
+              allowedEmails: project.allowedEmails || [],
+            }) as unknown as Promise<void>
+          );
+        });
+      };
+      sync(docSnap);
+      sync(folderSnap);
       await Promise.all(writes);
-      alert(`Synced ${writes.length} document${writes.length === 1 ? '' : 's'}.`);
+      alert(`Synced ${writes.length} item${writes.length === 1 ? '' : 's'}.`);
     } catch (err: any) {
-      console.error('Error syncing project docs:', err);
+      console.error('Error syncing project items:', err);
       alert('Failed to sync: ' + (err?.message || 'unknown error'));
     }
   };

@@ -95,13 +95,15 @@ service cloud.firestore {
     }
 
     function isValidFolder() {
-      return hasOnlyAllowedFields(['name', 'projectId', 'parentFolderId', 'createdAt', 'createdBy', 'order']) &&
+      return hasOnlyAllowedFields(['name', 'projectId', 'parentFolderId', 'createdAt', 'createdBy', 'order', 'visibility', 'allowedEmails']) &&
              request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() < 200 &&
              request.resource.data.projectId is string && request.resource.data.projectId.size() < 100 &&
              (request.resource.data.parentFolderId == null || (request.resource.data.parentFolderId is string && request.resource.data.parentFolderId.size() < 100)) &&
              request.resource.data.createdAt is string && request.resource.data.createdAt.size() < 50 &&
              request.resource.data.createdBy is string && request.resource.data.createdBy.size() < 100 &&
-             (!('order' in request.resource.data) || request.resource.data.order is number);
+             (!('order' in request.resource.data) || request.resource.data.order is number) &&
+             (!('visibility' in request.resource.data) || request.resource.data.visibility in ['project', 'restricted']) &&
+             (!('allowedEmails' in request.resource.data) || request.resource.data.allowedEmails is list);
     }
 
     function isValidDocument() {
@@ -162,7 +164,13 @@ service cloud.firestore {
     }
 
     match /folders/{folderId} {
-      allow read: if isAdmin() || hasProjectAccess(resource.data.projectId);
+      allow read: if isAdmin() || (
+        'allowedEmails' in resource.data &&
+        request.auth.token.email in resource.data.allowedEmails
+      ) || (
+        // Legacy folders without allowedEmails fall back to plain project access.
+        !('allowedEmails' in resource.data) && hasProjectAccess(resource.data.projectId)
+      );
       allow create: if isValidFolder() && isProjectEditor(request.resource.data.projectId);
       allow update: if isValidFolder() &&
                     request.resource.data.projectId == resource.data.projectId &&

@@ -84,6 +84,8 @@ interface FolderItem {
   createdAt: string;
   createdBy: string;
   order?: number;
+  visibility?: 'project' | 'restricted';
+  allowedEmails?: string[];
 }
 
 interface DocumentItem {
@@ -137,7 +139,10 @@ export default function Documents() {
     | { kind: 'document'; id: string; currentName: string };
   const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
 
-  const [visibilityTarget, setVisibilityTarget] = useState<DocumentItem | null>(null);
+  type VisibilityItem =
+    | { kind: 'document'; item: DocumentItem }
+    | { kind: 'folder'; item: FolderItem };
+  const [visibilityTarget, setVisibilityTarget] = useState<VisibilityItem | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -184,9 +189,16 @@ export default function Documents() {
     }
     setProjectLoading(true);
 
-    const foldersQ = query(collection(db, 'folders'), where('projectId', '==', currentProjectId));
-    // Viewers' LIST query must include the allowedEmails filter so it matches the
-    // document read rule; otherwise Firestore denies the entire list.
+    // Viewers' LIST queries must include an allowedEmails filter so they match
+    // the document/folder read rules. Folders without allowedEmails (legacy)
+    // won't appear for non-admins until Admin runs "Sync document access".
+    const foldersQ: Query<DocumentData> = isGlobalAdmin
+      ? query(collection(db, 'folders'), where('projectId', '==', currentProjectId))
+      : query(
+          collection(db, 'folders'),
+          where('projectId', '==', currentProjectId),
+          where('allowedEmails', 'array-contains', profile!.email)
+        );
     const docsQ: Query<DocumentData> = isGlobalAdmin
       ? query(collection(db, 'documents'), where('projectId', '==', currentProjectId))
       : query(
@@ -332,12 +344,14 @@ export default function Documents() {
   };
 
   const updateVisibility = async (
-    docId: string,
+    kind: 'document' | 'folder',
+    itemId: string,
     visibility: 'project' | 'restricted',
     allowedEmails: string[]
   ) => {
     try {
-      await updateDoc(doc(db, 'documents', docId), {
+      const collectionName = kind === 'document' ? 'documents' : 'folders';
+      await updateDoc(doc(db, collectionName, itemId), {
         visibility,
         allowedEmails,
       });
@@ -585,6 +599,8 @@ export default function Documents() {
         createdAt: new Date().toISOString(),
         createdBy: profile.email,
         order: nextOrder,
+        visibility: 'project',
+        allowedEmails: currentProject?.allowedEmails || [profile.email],
       });
       setCreatingFolder(false);
     } catch (err) {
@@ -643,6 +659,8 @@ export default function Documents() {
         createdAt: new Date().toISOString(),
         createdBy: profile.email,
         order: nextOrderValue(siblingFolders),
+        visibility: 'project',
+        allowedEmails: currentProject?.allowedEmails || [profile.email],
       });
       cache.set(key, created.id);
       parent = created.id;
@@ -1284,7 +1302,14 @@ export default function Documents() {
                             <Folder className="w-4 h-4 sm:w-5 sm:h-5" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-zinc-900 truncate">{f.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-zinc-900 truncate">{f.name}</p>
+                              {f.visibility === 'restricted' && (
+                                <span className="inline-flex items-center text-[10px] font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 flex-shrink-0">
+                                  <EyeOff className="w-3 h-3 mr-0.5" /> Private
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-zinc-500 mt-0.5">
                               Folder &bull; Created {format(new Date(f.createdAt), 'MMM d, yyyy')}
                             </p>
@@ -1306,6 +1331,27 @@ export default function Documents() {
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
+                          {canAdminCurrentProject && (
+                            <button
+                              onClick={() => setVisibilityTarget({ kind: 'folder', item: f })}
+                              className={`p-1.5 sm:p-2 rounded-full ${
+                                f.visibility === 'restricted'
+                                  ? 'text-purple-700 bg-purple-50 hover:bg-purple-100'
+                                  : 'text-zinc-700 bg-zinc-100 hover:bg-zinc-200'
+                              }`}
+                              title={
+                                f.visibility === 'restricted'
+                                  ? 'Private — only selected members can see this folder'
+                                  : 'Shared with project (click to restrict)'
+                              }
+                            >
+                              {f.visibility === 'restricted' ? (
+                                <EyeOff className="w-4 h-4" />
+                              ) : (
+                                <Users className="w-4 h-4" />
+                              )}
+                            </button>
+                          )}
                           <button
                             onClick={() => setFolderToDelete(f)}
                             className="p-1.5 sm:p-2 rounded-full text-red-700 bg-red-50 hover:bg-red-100"
@@ -1406,7 +1452,7 @@ export default function Documents() {
                           </button>
                           {canAdminCurrentProject && (
                             <button
-                              onClick={() => setVisibilityTarget(d)}
+                              onClick={() => setVisibilityTarget({ kind: 'document', item: d })}
                               className={`inline-flex items-center p-1.5 sm:p-2 rounded-full ${
                                 isRestricted
                                   ? 'text-purple-700 bg-purple-50 hover:bg-purple-100'
@@ -1492,11 +1538,23 @@ export default function Documents() {
 
       {visibilityTarget && currentProject && (
         <VisibilityModal
-          document={visibilityTarget}
+          itemKind={visibilityTarget.kind}
+          itemTitle={
+            visibilityTarget.kind === 'document'
+              ? visibilityTarget.item.title
+              : visibilityTarget.item.name
+          }
+          initialVisibility={visibilityTarget.item.visibility || 'project'}
+          initialAllowedEmails={visibilityTarget.item.allowedEmails || []}
           projectAllowedEmails={currentProject.allowedEmails || []}
           onClose={() => setVisibilityTarget(null)}
           onSubmit={async (visibility, emails) => {
-            await updateVisibility(visibilityTarget.id, visibility, emails);
+            await updateVisibility(
+              visibilityTarget.kind,
+              visibilityTarget.item.id,
+              visibility,
+              emails
+            );
             setVisibilityTarget(null);
           }}
         />
@@ -1890,25 +1948,29 @@ function RenameModal({
 }
 
 function VisibilityModal({
-  document: documentItem,
+  itemKind,
+  itemTitle,
+  initialVisibility: initialVisProp,
+  initialAllowedEmails,
   projectAllowedEmails,
   onClose,
   onSubmit,
 }: {
-  document: DocumentItem;
+  itemKind: 'document' | 'folder';
+  itemTitle: string;
+  initialVisibility: 'project' | 'restricted';
+  initialAllowedEmails: string[];
   projectAllowedEmails: string[];
   onClose: () => void;
   onSubmit: (visibility: 'project' | 'restricted', emails: string[]) => Promise<void>;
 }) {
-  const initialVisibility: 'project' | 'restricted' = documentItem.visibility || 'project';
   const initialRestricted = new Set(
-    (documentItem.allowedEmails && documentItem.allowedEmails.length > 0
-      ? documentItem.allowedEmails
-      : projectAllowedEmails
-    ).filter((e) => projectAllowedEmails.includes(e))
+    (initialAllowedEmails.length > 0 ? initialAllowedEmails : projectAllowedEmails).filter((e) =>
+      projectAllowedEmails.includes(e)
+    )
   );
 
-  const [visibility, setVisibility] = useState<'project' | 'restricted'>(initialVisibility);
+  const [visibility, setVisibility] = useState<'project' | 'restricted'>(initialVisProp);
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(initialRestricted);
   const [submitting, setSubmitting] = useState(false);
 
@@ -1938,8 +2000,10 @@ function VisibilityModal({
         onSubmit={handleSubmit}
         className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl"
       >
-        <h3 className="text-lg font-semibold text-zinc-900 mb-1">Document visibility</h3>
-        <p className="text-sm text-zinc-500 mb-4 truncate">&quot;{documentItem.title}&quot;</p>
+        <h3 className="text-lg font-semibold text-zinc-900 mb-1">
+          {itemKind === 'folder' ? 'Folder visibility' : 'Document visibility'}
+        </h3>
+        <p className="text-sm text-zinc-500 mb-4 truncate">&quot;{itemTitle}&quot;</p>
 
         <div className="space-y-2">
           <label className="flex items-start gap-3 p-3 rounded-lg border border-zinc-200 cursor-pointer hover:bg-zinc-50">
